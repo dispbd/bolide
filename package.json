@@ -1,0 +1,30 @@
+{
+  "name": "alloy-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:up": "bash scripts/db-up.sh",
+    "db:down": "bash scripts/db-down.sh",
+    "server": "tsx spike/server/main.ts",
+    "test": "tsx --test spike/**/*.test.ts",
+    "bench": "tsx spike/bench/latency.ts",
+    "bundle-size": "node spike/bench/bundle-size.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@electric-sql/client": "^1.5.28",
+    "@hono/node-server": "^2.1.5",
+    "@standard-schema/spec": "^1.1.0",
+    "@tanstack/db": "^0.15.2",
+    "@tanstack/electric-db-collection": "^0.6.3",
+    "hono": "^4.13.13",
+    "postgres": "^3.4.9",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "5.9"
+  }
+}

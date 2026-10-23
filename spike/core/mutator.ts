@@ -22,17 +22,22 @@ export interface MutatorContext<I> {
   userId?: string
 }
 
-export interface Mutator<S extends StandardSchemaV1 = StandardSchemaV1> {
-  name: string
+export interface Mutator<S extends StandardSchemaV1 = StandardSchemaV1, N extends string = string> {
+  name: N
   input: S
   run(ctx: MutatorContext<StandardSchemaV1.InferOutput<S>>): Promise<void> | void
 }
 
-export function defineMutator<S extends StandardSchemaV1>(def: Mutator<S>): Mutator<S> {
+export function defineMutator<const N extends string, S extends StandardSchemaV1>(def: Mutator<S, N>): Mutator<S, N> {
   return def
 }
 
-export type MutatorRegistry = Record<string, Mutator<any>>
+export type MutatorRegistry = Record<string, Mutator<any, string>>
+
+/** Builds a name-keyed registry that keeps each mutator's literal name and input type. */
+export function mutatorRegistry<const T extends Mutator<any, string>[]>(...list: T): { [M in T[number] as M['name']]: M } {
+  return Object.fromEntries(list.map((m) => [m.name, m])) as any
+}
 
 export class MutatorError extends Error {
   constructor(

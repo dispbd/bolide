@@ -6,7 +6,8 @@
     "db:up": "bash scripts/db-up.sh",
     "db:down": "bash scripts/db-down.sh",
     "server": "tsx spike/server/main.ts",
-    "test": "tsx --test spike/**/*.test.ts",
+    "test": "tsx --test spike/core/*.test.ts",
+    "test:int": "tsx --test spike/**/*.int.test.ts",
     "bench": "tsx spike/bench/latency.ts",
     "bundle-size": "node spike/bench/bundle-size.mjs",
     "typecheck": "tsc --noEmit"

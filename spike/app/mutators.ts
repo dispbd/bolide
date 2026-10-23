@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { defineMutator, MutatorError, type Row } from '../core/mutator.ts'
+import { defineMutator, mutatorRegistry, MutatorError, type Row } from '../core/mutator.ts'
 
 export interface Todo extends Row {
   id: string
@@ -43,8 +43,4 @@ export const renameTodo = defineMutator({
   },
 })
 
-export const mutators = {
-  [createTodo.name]: createTodo,
-  [toggleTodo.name]: toggleTodo,
-  [renameTodo.name]: renameTodo,
-}
+export const mutators = mutatorRegistry(createTodo, toggleTodo, renameTodo)

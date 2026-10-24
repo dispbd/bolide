@@ -6,17 +6,17 @@ import { serve } from '@hono/node-server'
 import postgres from 'postgres'
 import { createServer } from '../server/app.ts'
 import { mutators, type Todo } from '../app/mutators.ts'
-import { createAlloyClient } from '../core/client.ts'
+import { createCrucibleClient } from '../core/client.ts'
 
 const N = Number(process.env.N ?? 200)
-const sql = postgres(process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54321/alloy', { onnotice: () => {} })
+const sql = postgres(process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54321/crucible', { onnotice: () => {} })
 const app = createServer({ sql, mutators, tables: ['todos'], electricUrl: process.env.ELECTRIC_URL ?? 'http://localhost:3000' })
 const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
   const s = serve({ fetch: app.fetch, port: 0 }, () => resolve(s))
 })
 const baseUrl = `http://localhost:${(server.address() as any).port}`
 const userId = randomUUID()
-const client = createAlloyClient({ baseUrl, userId, tables: ['todos'], mutators })
+const client = createCrucibleClient({ baseUrl, userId, tables: ['todos'], mutators })
 await client.ready()
 
 const id = randomUUID()

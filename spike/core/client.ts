@@ -19,7 +19,7 @@ export class MutationRejected extends Error {
 
 type Input<M extends MutatorRegistry, K extends keyof M> = Parameters<M[K]['run']>[0]['input']
 
-export function createCrucibleClient<M extends MutatorRegistry>(opts: ClientOptions<M>) {
+export function createBolideClient<M extends MutatorRegistry>(opts: ClientOptions<M>) {
   const headers = { 'x-user-id': opts.userId }
   const collections: Record<string, Collection<Row, string>> = {}
   for (const table of opts.tables) {

@@ -21,15 +21,15 @@ CONF
 fi
 "${RUN_AS[@]}" "$PGBIN/pg_ctl" -D "$PGDATA" status >/dev/null 2>&1 \
   || "${RUN_AS[@]}" "$PGBIN/pg_ctl" -D "$PGDATA" -l "$PGDATA/server.log" -w start >/dev/null
-psql -h localhost -p "$PGPORT" -U postgres -tc "select 1 from pg_database where datname='crucible'" | grep -q 1 \
-  || psql -h localhost -p "$PGPORT" -U postgres -c "create database crucible" >/dev/null
+psql -h localhost -p "$PGPORT" -U postgres -tc "select 1 from pg_database where datname='bolide'" | grep -q 1 \
+  || psql -h localhost -p "$PGPORT" -U postgres -c "create database bolide" >/dev/null
 psql -h localhost -p "$PGPORT" -U postgres -qc "alter user postgres password 'postgres'"
-psql -h localhost -p "$PGPORT" -U postgres -d crucible -q -f "$ROOT/spike/server/schema.sql"
+psql -h localhost -p "$PGPORT" -U postgres -d bolide -q -f "$ROOT/spike/server/schema.sql"
 
-if ! docker ps --format '{{.Names}}' | grep -q '^crucible-electric$'; then
-  docker rm -f crucible-electric >/dev/null 2>&1 || true
-  docker run -d --name crucible-electric --network host \
-    -e DATABASE_URL="postgresql://postgres:postgres@localhost:$PGPORT/crucible?sslmode=disable" \
+if ! docker ps --format '{{.Names}}' | grep -q '^bolide-electric$'; then
+  docker rm -f bolide-electric >/dev/null 2>&1 || true
+  docker run -d --name bolide-electric --network host \
+    -e DATABASE_URL="postgresql://postgres:postgres@localhost:$PGPORT/bolide?sslmode=disable" \
     -e ELECTRIC_INSECURE=true -e ELECTRIC_PORT="$ELECTRIC_PORT" \
     electricsql/electric:latest >/dev/null
 fi
@@ -37,4 +37,4 @@ for i in $(seq 1 60); do
   curl -sf "http://localhost:$ELECTRIC_PORT/v1/health" | grep -q active && { echo "postgres :$PGPORT, electric :$ELECTRIC_PORT ready"; exit 0; }
   sleep 1
 done
-echo "electric did not become ready"; docker logs --tail 30 crucible-electric; exit 1
+echo "electric did not become ready"; docker logs --tail 30 bolide-electric; exit 1

@@ -5,16 +5,16 @@ import { serve } from '@hono/node-server'
 import postgres from 'postgres'
 import { createServer } from './app.ts'
 import { mutators, type Todo } from '../app/mutators.ts'
-import { createCrucibleClient, MutationRejected } from '../core/client.ts'
+import { createBolideClient, MutationRejected } from '../core/client.ts'
 
 // Needs `npm run db:up` (Postgres + Electric).
-const sql = postgres(process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54321/crucible', { onnotice: () => {} })
+const sql = postgres(process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54321/bolide', { onnotice: () => {} })
 const A = randomUUID()
 const B = randomUUID()
 let server: ReturnType<typeof serve>
 let baseUrl: string
-let alice: ReturnType<typeof createCrucibleClient<typeof mutators>>
-let bob: ReturnType<typeof createCrucibleClient<typeof mutators>>
+let alice: ReturnType<typeof createBolideClient<typeof mutators>>
+let bob: ReturnType<typeof createBolideClient<typeof mutators>>
 
 const until = async (check: () => boolean, ms = 5000) => {
   const end = Date.now() + ms
@@ -33,8 +33,8 @@ before(async () => {
       resolve()
     })
   })
-  alice = createCrucibleClient({ baseUrl, userId: A, tables: ['todos'], mutators })
-  bob = createCrucibleClient({ baseUrl, userId: B, tables: ['todos'], mutators })
+  alice = createBolideClient({ baseUrl, userId: A, tables: ['todos'], mutators })
+  bob = createBolideClient({ baseUrl, userId: B, tables: ['todos'], mutators })
   await Promise.all([alice.ready(), bob.ready()])
 })
 

@@ -1,4 +1,4 @@
-# Crucible
+# Bolide
 
 Экспериментальный Node.js/TypeScript-фреймворк, который соединяет:
 

@@ -62,7 +62,7 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
             request,
           }
           const deps = await scope.resolveAll(route.inject)
-          return toResponse(await route.handler(ctx as never, deps))
+          return toResponse(await route.handler(ctx as never, deps), route.status)
         } catch (e) {
           return errorResponse(e, request, onError)
         } finally {
@@ -124,10 +124,10 @@ async function readText(request: Request, limit: number) {
   return new TextDecoder().decode(bytes)
 }
 
-function toResponse(result: unknown): Response {
+function toResponse(result: unknown, status: number): Response {
   if (result instanceof Response) return result
   if (result === undefined) return new Response(null, { status: 204 })
-  return Response.json(result)
+  return Response.json(result, { status })
 }
 
 function errorResponse(e: unknown, request: Request, onError: ErrorReporter): Response {

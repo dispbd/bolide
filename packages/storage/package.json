@@ -1,0 +1,28 @@
+{
+  "name": "@bolide/storage",
+  "version": "0.0.0",
+  "description": "Bolide storage: files on memory, local disk or S3-compatible services",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@bolide/core": "0.0.0"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

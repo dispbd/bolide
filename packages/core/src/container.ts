@@ -4,6 +4,18 @@ import type { AnyService, InstanceOf, Service } from './service.ts'
 
 export type Override = { provide: AnyService; useValue: unknown } | { provide: AnyService; useService: AnyService }
 
+/**
+ * Provides `token` with another implementation, inside a module's `providers`. The token stays
+ * what others inject; the implementation's dependencies must be visible from that module.
+ * Batteries use it to let you pick a driver: `bind(CacheDriver, { useValue: redisStore(client) })`.
+ */
+export function bind<S extends AnyService>(
+  token: S,
+  by: { useValue: InstanceOf<S> } | { useService: Service<InstanceOf<S>, any> },
+): Override {
+  return { provide: token, ...by } as Override
+}
+
 /** Type-checked override: the replacement must match the original's instance type. */
 export function override<S extends AnyService>(
   provide: S,
@@ -30,6 +42,8 @@ export class Container {
   readonly owner = new Map<AnyService, Module>()
   private readonly visible = new Map<Module, Set<AnyService>>()
   private readonly replaced = new Map<AnyService, Override>()
+  /** Module-level bindings: token -> implementation. App overrides still win over them. */
+  private readonly bound = new Map<AnyService, Override>()
   private readonly builtins: Set<AnyService>
   /** What app-wide middleware sees: built-ins, globals and the exports of the app's modules. */
   private readonly rootVisible: Set<AnyService>
@@ -48,6 +62,8 @@ export class Container {
           throw new DependencyError(`service "${p.name}" is provided by both "${other.name}" and "${m.name}". Provide it in one module and export it.`)
         }
         this.owner.set(p, m)
+        const b = m.bindings.get(p)
+        if (b) this.bound.set(p, b)
       }
     }
     const globals = new Set<AnyService>()
@@ -81,20 +97,22 @@ export class Container {
   /** Throws unless every dependency of `consumer` is visible from module `m`. */
   checkDeps(m: Module, consumer: { name: string; inject: Record<string, AnyService>; scope?: string }, what = 'service') {
     const effective = this.effective(consumer as AnyService)
-    // An override's deps are not checked for visibility (it may come from anywhere),
-    // but a singleton reaching a request-scoped service is a mistake either way.
+    // An app override's deps are not checked for visibility (it may come from anywhere),
+    // but a module binding's are, and a singleton reaching a request-scoped service is a mistake either way.
     const overridden = effective !== consumer
+    const fromApp = this.replaced.has(consumer as AnyService)
     const scope = overridden ? effective.scope : consumer.scope
     for (const dep of Object.values(overridden ? depsOf(effective) : consumer.inject)) {
-      if (!overridden && !this.visible.get(m)!.has(dep)) {
+      if (!fromApp && !this.visible.get(m)!.has(dep)) {
         const where = this.owner.get(dep)
         const hint = where
           ? `"${where.name}" provides it; import that module and make sure it exports "${dep.name}".`
           : `no module provides it; add it to the providers of "${m.name}" or of a module it imports.`
-        throw new DependencyError(`${what} "${consumer.name}" in module "${m.name}" injects "${dep.name}", which is not visible: ${hint}`)
+        const who = overridden ? `"${consumer.name}" (bound to "${effective.name}")` : `"${consumer.name}"`
+        throw new DependencyError(`${what} ${who} in module "${m.name}" injects "${dep.name}", which is not visible: ${hint}`)
       }
       if (scope === 'singleton' && this.effective(dep).scope === 'request') {
-        const by = overridden ? `"${consumer.name}" (overridden by "${effective.name}")` : `"${consumer.name}"`
+        const by = overridden ? `"${consumer.name}" (${fromApp ? 'overridden by' : 'bound to'} "${effective.name}")` : `"${consumer.name}"`
         throw new DependencyError(`singleton ${by} cannot inject request-scoped "${dep.name}". Make it request-scoped too.`)
       }
     }
@@ -165,7 +183,7 @@ export class Container {
 
   /** @internal The service definition that actually runs for `s`, after overrides. */
   effective(s: AnyService): AnyService {
-    const o = this.replaced.get(s)
+    const o = this.replaced.get(s) ?? this.bound.get(s)
     if (!o) return s
     if ('useService' in o) return o.useService
     return { ...s, inject: {}, factory: () => o.useValue, onInit: undefined, onDestroy: undefined }

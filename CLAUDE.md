@@ -6,6 +6,7 @@ An experimental Node.js/TypeScript framework: the structure of Nest.js, the buil
 
 - Everything in the repository is in English: code, comments, docs, commit messages, PRs.
 - Branches: one `phase-N` branch per roadmap phase; heavy sub-tasks of a phase go in `phase-N-<task>` and merge into the phase branch with `--no-ff`. A finished phase is merged into `main` through a pull request.
+- Mark AI-written work (`Co-Authored-By: Claude` in commits, a "Generated with Claude Code" line in PRs), but don't add claude.ai session links to commits or PR descriptions.
 - Match the surrounding code: small modules, comments only where they explain why, no new dependencies without a reason in the PR.
 
 ## Principles (packages/core)
@@ -23,11 +24,14 @@ An experimental Node.js/TypeScript framework: the structure of Nest.js, the buil
 npm ci
 npm run typecheck   # tsc, including packages/core/test/types.check.ts
 npm test            # builds, then unit tests (node:test via tsx, sources via the bolide-source condition)
-npm run build       # tsc -> packages/*/dist (what npm consumers get)
+npm run build       # tsc -> packages/*/dist (what npm consumers get); core builds first
 npm run pack:check  # packs the packages, installs them into a fresh `bolide create` project, typechecks and tests it
-npm run db:up && npm run test:int   # spike integration tests: Postgres + Electric in Docker
+npm run db:up && npm run test:int   # integration tests: Postgres (+ Electric in Docker for the spike)
+npm run test:int:packages           # only the drivers' tests in packages/*/test/int (needs Postgres, DATABASE_URL)
 ```
 
 Packages export `dist/` to consumers and `src/` under the `bolide-source` condition, which the repo's tsconfig and test scripts enable. Relative imports use `.ts` extensions; the build rewrites them.
+
+Batteries (`packages/cache`, ...) are separate packages with `@bolide/core` as a peer dependency, so an app has one core and shared tokens. Add a new package to the root `build` script and to `scripts/pack-check.sh`.
 
 Compile-time behavior is tested in `packages/core/test/types.check.ts` with `@ts-expect-error`; add a case there when you change public types.

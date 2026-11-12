@@ -4,6 +4,8 @@ import { BolideError, HttpError, ValidationError } from './errors.ts'
 import type { MiddlewareContext, Use } from './middleware.ts'
 import type { Module } from './module.ts'
 import type { AnyRoute, Method } from './route.ts'
+import { RequestId, type Logger } from './log.ts'
+import type { Span, Tracer } from './trace.ts'
 import { parse, type StandardSchemaV1 } from './schema.ts'
 import { defineService, type AnyService } from './service.ts'
 
@@ -23,7 +25,15 @@ export interface RouteInfo {
   route: AnyRoute
 }
 
-export type ErrorReporter = (error: unknown, request: Request) => void
+/** Gets every unexpected error (the client sees a plain 500), with the id of the request it happened in. */
+export type ErrorReporter = (error: unknown, request: Request, info: { requestId: string }) => void
+
+/** What the route handler tells the app-level wrapper about a request, for the access log. */
+interface RequestEnv {
+  scope: RequestScope
+  report: (error: unknown, request: Request) => void
+  matched: { route?: string }
+}
 
 /**
  * Turns the modules' routes into a Hono app. Hono stays an implementation
@@ -36,6 +46,10 @@ export interface HttpOptions {
   use?: readonly Use[]
   /** Answers some requests before routing (the OpenAPI document), still inside app middleware. */
   prelude?: (routes: readonly RouteInfo[]) => (request: Request) => Response | undefined
+  /** Writes one line per request to this logger when set. */
+  accessLog?: () => Logger
+  /** Wraps each request in a server span. */
+  tracer?: () => Tracer
 }
 
 export function buildHttp(container: Container, modules: readonly Module[], onError: ErrorReporter, options: HttpOptions) {
@@ -61,7 +75,8 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
       const info = { method: route.method, path, module: m.name }
       hono.on(route.method, path, async (c) => {
         const request = c.req.raw
-        const { scope } = c.env as { scope: RequestScope }
+        const { scope, report, matched } = c.env as RequestEnv
+        matched.route = path
         // The handler's errors become responses here, so middleware always sees a Response.
         const handle = async () => {
           try {
@@ -74,13 +89,13 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
             const deps = await scope.resolveAll(route.inject)
             return toResponse(await route.handler(ctx as never, deps), route.status)
           } catch (e) {
-            return errorResponse(e, request, onError)
+            return errorResponse(e, request, report)
           }
         }
         try {
-          return await runChain(uses, { request, route: info }, scope, onError, handle)
+          return await runChain(uses, { request, route: info }, scope, report, handle)
         } catch (e) {
-          return errorResponse(e, request, onError)
+          return errorResponse(e, request, report)
         }
       })
     }
@@ -90,16 +105,63 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
 
   const prelude = options.prelude?.(routes)
   const appUse = options.use ?? []
-  const fetch = async (request: Request) => {
-    const scope = container.createScope(new Map<AnyService, unknown>([[CurrentRequest, request]]))
+  const access = options.accessLog
+  const fetch = (request: Request) => {
+    const path = new URL(request.url).pathname
+    if (!options.tracer) return serve(request, path)
+    return options.tracer().span(request.method, (span) => serve(request, path, span), {
+      kind: 'server',
+      parent: request.headers,
+      attributes: { 'http.request.method': request.method, 'url.path': path },
+    })
+  }
+  const serve = async (request: Request, path: string, span?: Span) => {
+    const started = performance.now()
+    const requestId = incomingId(request.headers.get('x-request-id')) ?? crypto.randomUUID()
+    const report = (e: unknown, r: Request) => {
+      span?.recordError(e)
+      onError(e, r, { requestId })
+    }
+    const matched: RequestEnv['matched'] = {}
+    const scope = container.createScope(
+      new Map<AnyService, unknown>([
+        [CurrentRequest, request],
+        [RequestId, requestId],
+      ]),
+    )
+    let res: Response
     try {
-      return await runChain(appUse, { request }, scope, onError, async () => prelude?.(request) ?? (await hono.fetch(request, { scope })))
+      const env: RequestEnv = { scope, report, matched }
+      res = await runChain(appUse, { request }, scope, report, async () => prelude?.(request) ?? (await hono.fetch(request, env)))
     } catch (e) {
-      return errorResponse(e, request, onError)
+      res = errorResponse(e, request, report)
     } finally {
       // Request-scoped instances end when the handler returns, before a streamed body is read.
-      await scope.dispose().catch((e) => onError(e, request))
+      await scope.dispose().catch((e) => report(e, request))
     }
+    // An id the app set itself (say, from its own tracing) wins.
+    if (!res.headers.has('x-request-id')) res = withHeader(res, 'x-request-id', requestId)
+    if (span) {
+      span.setAttribute('http.response.status_code', res.status)
+      if (matched.route) {
+        span.updateName(`${request.method} ${matched.route}`)
+        span.setAttribute('http.route', matched.route)
+      }
+    }
+    if (access) {
+      const ms = Math.round((performance.now() - started) * 10) / 10
+      const at = res.status >= 500 ? 'error' : res.status >= 400 ? 'warn' : 'info'
+      access()[at](`${request.method} ${path} ${res.status} ${ms}ms`, {
+        reqId: requestId,
+        method: request.method,
+        path,
+        ...(matched.route ? { route: matched.route } : {}),
+        status: res.status,
+        ms,
+        ...(span?.traceId ? { traceId: span.traceId } : {}),
+      })
+    }
+    return res
   }
   return { fetch, routes }
 }
@@ -112,7 +174,7 @@ async function runChain(
   uses: readonly Use[],
   ctx: MiddlewareContext,
   scope: RequestScope,
-  onError: ErrorReporter,
+  onError: RequestEnv['report'],
   inner: () => Promise<Response>,
 ) {
   const step = async (i: number): Promise<Response> => {
@@ -204,7 +266,7 @@ function toResponse(result: unknown, status: number): Response {
   return Response.json(result, { status })
 }
 
-function errorResponse(e: unknown, request: Request, onError: ErrorReporter): Response {
+function errorResponse(e: unknown, request: Request, onError: RequestEnv['report']): Response {
   if (e instanceof ValidationError) {
     return Response.json({ error: 'validation_failed', message: e.message, where: e.where, issues: e.issues }, { status: 400 })
   }
@@ -214,6 +276,24 @@ function errorResponse(e: unknown, request: Request, onError: ErrorReporter): Re
   }
   onError(e, request)
   return Response.json({ error: 'internal_error', message: 'internal server error' }, { status: 500 })
+}
+
+/** Reuse a caller's id only when it can't inject anything into logs or headers. */
+function incomingId(value: string | null) {
+  return value && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : undefined
+}
+
+/** Sets a header, copying the response when its headers are immutable. Upgrades (101) pass through untouched. */
+function withHeader(res: Response, name: string, value: string) {
+  if (res.status < 200) return res
+  try {
+    res.headers.set(name, value)
+    return res
+  } catch {
+    const copy = mutable(res)
+    if (copy !== res) copy.headers.set(name, value)
+    return copy
+  }
 }
 
 function joinPath(prefix: string, path: string) {

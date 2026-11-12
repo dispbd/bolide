@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Container, override } from '../src/container.ts'
+import { bind, Container, override } from '../src/container.ts'
 import { DependencyError } from '../src/errors.ts'
 import { defineModule } from '../src/module.ts'
 import { defineService, defineValue } from '../src/service.ts'
@@ -208,6 +208,54 @@ describe('overrides', () => {
     assert.throws(
       () => new Container({ modules: [defineModule({ name: 'app', providers: [Db, Users] })], overrides: [override(Db, { useService: ReqDb })] }),
       /singleton "Users" cannot inject request-scoped "Db"/,
+    )
+  })
+})
+
+describe('bindings', () => {
+  const Store = defineService<{ kind: string }>({ name: 'Store', factory: () => ({ kind: 'default' }) })
+  const Reader = defineService({ name: 'Reader', inject: { store: Store }, factory: ({ store }) => store.kind })
+
+  test('a module provides a token with a value or another service', async () => {
+    let c = await boot({ name: 'app', providers: [bind(Store, { useValue: { kind: 'value' } }), Reader] })
+    assert.equal(c.get(Reader), 'value')
+    const Url = defineValue('Url', 'redis://x')
+    const Redis = defineService({ name: 'RedisStore', inject: { url: Url }, factory: ({ url }) => ({ kind: url }) })
+    c = await boot({ name: 'app', providers: [Url, bind(Store, { useService: Redis }), Reader] })
+    assert.equal(c.get(Reader), 'redis://x')
+  })
+
+  test('the token is what importers see', async () => {
+    const lib = defineModule({ name: 'lib', providers: [bind(Store, { useValue: { kind: 'lib' } })], exports: [Store] })
+    const c = await boot({ name: 'app', imports: [lib], providers: [Reader] })
+    assert.equal(c.get(Reader), 'lib')
+  })
+
+  test("a binding's dependencies must be visible from its module", () => {
+    const Hidden = defineValue('Hidden', 'x')
+    const Impl = defineService({ name: 'Impl', inject: { h: Hidden }, factory: ({ h }) => ({ kind: h }) })
+    const other = defineModule({ name: 'other', providers: [Hidden] })
+    assert.throws(
+      () => new Container({ modules: [other, defineModule({ name: 'app', providers: [bind(Store, { useService: Impl })] })] }),
+      /service "Store" \(bound to "Impl"\) in module "app" injects "Hidden", which is not visible/,
+    )
+  })
+
+  test('an app override beats a module binding', async () => {
+    const c = new Container({
+      modules: [defineModule({ name: 'app', providers: [bind(Store, { useValue: { kind: 'bound' } }), Reader] })],
+      overrides: [override(Store, { useValue: { kind: 'test' } })],
+    })
+    await c.start()
+    assert.equal(c.get(Reader), 'test')
+  })
+
+  test('binding a singleton token to a service that injects a request-scoped one fails at boot', () => {
+    const Req = defineService({ name: 'Req', scope: 'request', factory: () => 1 })
+    const Impl = defineService({ name: 'Impl', inject: { r: Req }, factory: () => ({ kind: 'x' }) })
+    assert.throws(
+      () => new Container({ modules: [defineModule({ name: 'app', providers: [Req, bind(Store, { useService: Impl })] })] }),
+      /singleton "Store" \(bound to "Impl"\) cannot inject request-scoped "Req"/,
     )
   })
 })

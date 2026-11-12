@@ -108,12 +108,12 @@ describe('bolide dev', () => {
     const dir = join(tmp, 'devapp')
     await create({ dir, local: repo })
     const port = await freePort()
-    const child = spawn(process.execPath, [bin, 'dev', '--port', String(port)], { cwd: dir, stdio: 'pipe' })
+    const child = spawn(process.execPath, [bin, 'dev', '--port', String(port)], { cwd: dir, stdio: 'pipe', env: { ...process.env, LOG_LEVEL: 'info' } })
     let output = ''
     child.stdout.on('data', (d) => (output += d))
     child.stderr.on('data', (d) => (output += d))
     try {
-      await until(() => output.includes('Listening on'), () => output)
+      await until(() => output.includes('listening on http://'), () => output)
       assert.equal((await fetch(`http://localhost:${port}/users`)).status, 200)
 
       const module = join(dir, 'src/users/users.module.ts')

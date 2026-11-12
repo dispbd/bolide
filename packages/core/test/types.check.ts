@@ -166,3 +166,33 @@ defineMiddleware({
   // @ts-expect-error middleware must return a Response
   handle: () => 'nope',
 })
+
+// Logging: Log and RequestLog inject as Logger; fields are a record.
+import { Log, RequestLog } from '../src/log.ts'
+defineService({
+  name: 'Audit',
+  inject: { log: Log },
+  factory: ({ log }) => {
+    log.info('ready', { n: 1 })
+    // @ts-expect-error fields must be an object
+    log.info('ready', 1)
+    return log.child({ svc: 'audit' })
+  },
+})
+defineRoute({
+  method: 'GET',
+  path: '/log',
+  inject: { log: RequestLog },
+  handler: (_ctx, { log }) => {
+    log.warn('slow')
+    // @ts-expect-error no such level
+    log.trace('x')
+    return null
+  },
+})
+
+// bind(): the implementation must match the token's instance type.
+import { bind } from '../src/container.ts'
+bind(Db, { useValue: { query: (sql: string) => [sql] } })
+// @ts-expect-error wrong instance type
+bind(Db, { useValue: { query: 1 } })

@@ -1,6 +1,6 @@
 # @bolide/data
 
-Tables, mutators and shapes that the server and the browser share. One table definition gives row types, validation and SQL; a mutator is a change written once and run both optimistically in the browser and for real on the server. Shapes (read permissions) and the browser client come next ([phase 3 plan](../../docs/phase-3/plan.md)).
+Tables, mutators and shapes that the server and the browser share. One table definition gives row types, validation and SQL; a mutator is a change written once and run both optimistically in the browser and for real on the server. a shape is a set of rows the browser may sync, with its read rule kept on the server. The browser client comes next ([phase 3 plan](../../docs/phase-3/plan.md)).
 
 The root entry has no server code and no dependencies beyond Standard Schema types, so it is cheap in a browser bundle. Server-only parts (the mutation endpoint, SQL, migrations) are in `@bolide/data/server`, which needs `@bolide/core`.
 
@@ -108,3 +108,26 @@ export const placeOrderOnServer = onServer(placeOrder, {
   },
 })
 ```
+
+## Shapes
+
+```ts
+import { defineShape } from '@bolide/data'
+
+export const myTodos = defineShape('todos.mine', todos, {
+  where: ({ userId }) => (userId ? { ownerId: userId } : false), // false: 401 when signed out, 403 otherwise
+})
+export const directory = defineShape('users.directory', users, { columns: ['email'] }) // never send password hashes
+```
+
+The browser asks for a shape by name and never sends a table, columns or a filter, so anyone who opens the network tab still gets only what `where` allows. `where` runs on the server for every request and returns conditions joined with AND: a value means equality, `null` means IS NULL, and `{ in: [...] }`, `{ ne }`, `{ gt }`, `{ gte }`, `{ lt }`, `{ lte }` compare. Column names come from the table and every value is a SQL parameter. JSON columns can't be filtered on.
+
+On the server, add the shapes and a sync source to `dataModule`:
+
+```ts
+import { dataModule, electric } from '@bolide/data/server'
+
+dataModule({ sql, tables, mutators, shapes: [myTodos, directory], sync: electric({ url: process.env.ELECTRIC_URL! }), userId: CurrentUserId })
+```
+
+`GET /api/data/shape/todos.mine` proxies the [Electric](https://electric-sql.com) shape protocol. Only Electric's own protocol params (`offset`, `handle`, `live`, `cursor`...) pass through from the browser. Cache headers become `private` with `Vary: cookie, authorization`, because the rows depend on who asks. For Electric Cloud, pass `sourceId` and `secret`; they stay on the server.

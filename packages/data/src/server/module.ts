@@ -1,9 +1,11 @@
 import { BolideError, defineModule, defineRoute, defineService, defineValue, HttpError, Log, type AnyService, type Deps, type Module, type Resolved, type Service } from '@bolide/core'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import { checkInput, MutatorError, type AnyMutator, type MutatorContext } from '../mutator.ts'
+import type { AnyShape } from '../shape.ts'
 import type { AnyTable } from '../table.ts'
 import type { SqlClient } from './migrate.ts'
 import { postgresTx } from './pg-tx.ts'
+import { shapeColumns, whereSql, type SyncSource } from './shapes.ts'
 
 /** A mutator whose server run is replaced by one with injected services (mail, payments, secrets). */
 export interface ServerMutator<M extends AnyMutator = AnyMutator, D extends Deps = Deps> {
@@ -41,6 +43,10 @@ export interface DataModuleOptions {
    * Without it, every mutation runs with `userId: undefined`.
    */
   userId?: Service<string | undefined, any>
+  /** Shapes the browser may sync. Each is served at `GET {prefix}/shape/{name}` with its read rule applied. */
+  shapes?: readonly AnyShape[]
+  /** Where shapes come from: `electric({ url })`. Needed when there are shapes. */
+  sync?: SyncSource
   /** Where the routes live. Default `/api/data`: `POST /api/data/mutate`. */
   prefix?: string
 }
@@ -89,6 +95,13 @@ export function dataModule(options: DataModuleOptions): Module {
     if (entries.has(mutator.name)) throw new BolideError(`dataModule: two mutators are named "${mutator.name}". Pass either the mutator or its onServer() version, once.`)
     entries.set(mutator.name, m.kind === 'server-mutator' ? { mutator, server: m } : { mutator })
   }
+  const shapes = new Map<string, AnyShape>()
+  for (const sh of options.shapes ?? []) {
+    if (shapes.has(sh.name)) throw new BolideError(`dataModule: two shapes are named "${sh.name}".`)
+    if (!tables.has(sh.table)) throw new BolideError(`dataModule: shape "${sh.name}" reads table "${sh.table.name}", which is not in dataModule({ tables }).`)
+    shapes.set(sh.name, sh)
+  }
+  if (shapes.size && !options.sync) throw new BolideError('dataModule: shapes need a sync source. Pass sync: electric({ url: process.env.ELECTRIC_URL }).')
   const prefix = (options.prefix ?? '/api/data').replace(/\/$/, '')
   if (!prefix.startsWith('/')) throw new BolideError(`dataModule prefix must start with "/", got "${options.prefix}".`)
 
@@ -145,6 +158,25 @@ export function dataModule(options: DataModuleOptions): Module {
     },
   })
 
+  const shape = defineRoute({
+    method: 'GET',
+    path: `${prefix}/shape/:name`,
+    inject: { userId: options.userId ?? NoUser },
+    handler: async ({ request, params }, { userId }) => {
+      const sh = shapes.get(params.name)
+      if (!sh) throw new HttpError(404, `no shape "${params.name}"`, undefined, 'unknown_shape')
+      const where = sh.where({ userId })
+      if (where === false) throw new HttpError(userId === undefined ? 401 : 403, `shape "${sh.name}" is not readable here`)
+      return options.sync!.fetchShape({
+        table: sh.table.name,
+        columns: shapeColumns(sh),
+        where: whereSql(sh.table, where),
+        protocol: new URL(request.url).searchParams,
+        signal: request.signal,
+      })
+    },
+  })
+
   const providers: AnyService[] = [Setup, allDeps, ...Object.values(serverDeps), ...(given ? [] : [sqlToken]), ...(options.userId ? [] : [NoUser])]
-  return defineModule({ name: 'data', providers, routes: [mutate] })
+  return defineModule({ name: 'data', providers, routes: shapes.size ? [mutate, shape] : [mutate] })
 }

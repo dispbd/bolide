@@ -3,3 +3,6 @@ export { parse, type Infer, type ParseResult, type StandardSchemaV1 } from './sc
 export { defineService, defineValue, type AnyService, type Deps, type InstanceOf, type Resolved, type Scope, type Service, type ServiceOptions } from './service.ts'
 export { defineModule, type Module, type ModuleOptions } from './module.ts'
 export { Container, RequestScope, override, type ContainerOptions, type Override } from './container.ts'
+export { defineRoute, json, type AnyRoute, type Method, type Route, type RouteContext, type RouteOptions } from './route.ts'
+export { CurrentRequest, type ErrorReporter, type RouteInfo } from './http.ts'
+export { createApp, type App, type AppOptions } from './app.ts'

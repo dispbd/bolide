@@ -45,10 +45,10 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 kill -- -"$dev" 2>/dev/null || kill "$dev" 2>/dev/null || true
-# bolide dev forwards SIGTERM to the app and exits; never wait forever if it doesn't.
-for _ in $(seq 1 25); do kill -0 "$dev" 2>/dev/null || break; sleep 0.2; done
-if kill -0 "$dev" 2>/dev/null; then
-  echo "pack-check: bolide dev did not exit on SIGTERM" >&2
+# Every process in the group (bolide, node --watch, the app) must exit; never wait forever.
+for _ in $(seq 1 25); do kill -0 -- -"$dev" 2>/dev/null || break; sleep 0.2; done
+if kill -0 -- -"$dev" 2>/dev/null; then
+  echo "pack-check: bolide dev or its app did not exit on SIGTERM" >&2
   cat dev.log >&2
   kill -9 -- -"$dev" 2>/dev/null || kill -9 "$dev" 2>/dev/null || true
   exit 1

@@ -1,0 +1,41 @@
+{
+  "name": "@bolide/client",
+  "version": "0.0.0",
+  "description": "Bolide browser client: a local store synced with shapes and optimistic mutations with rollback",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./electric": {
+      "bolide-source": "./src/electric.ts",
+      "types": "./dist/electric.d.ts",
+      "default": "./dist/electric.js"
+    }
+  },
+  "dependencies": {
+    "@bolide/data": "0.0.0"
+  },
+  "peerDependencies": {
+    "@electric-sql/client": "^1.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@electric-sql/client": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

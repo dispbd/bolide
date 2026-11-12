@@ -27,6 +27,7 @@ An experimental Node.js/TypeScript framework that combines:
 | [`@bolide/storage`](packages/storage) | Files on memory, disk or S3-compatible services; uploads. |
 | [`@bolide/i18n`](packages/i18n) | Typed messages, ICU plurals, locale detection. |
 | [`@bolide/data`](packages/data) | Tables shared by the server and the browser: row types, validation, SQL and migrations. Mutators and sync are in progress (phase 3). |
+| [`@bolide/client`](packages/client) | Browser store synced with shapes; optimistic mutations with rollback; Electric transport. |
 
 ## Roadmap
 

@@ -94,6 +94,20 @@ describe('serving files', () => {
     assert.equal((await send(new Blob(['x'], { type: 'text/html' }), 'a.html')).status, 415)
     assert.equal((await send(new Blob(['x'], { type: 'image/png' }), 'a.png', 'other')).status, 400)
     assert.equal((await app.fetch(new Request('http://x/avatar', { method: 'POST', body: 'x', headers: { 'content-type': 'text/plain' } }))).status, 415)
+    // A chunked body (no Content-Length) is counted as it streams in, not buffered whole: 10 MB offered, little read.
+    let pulled = 0
+    const head = new TextEncoder().encode('--b\r\ncontent-disposition: form-data; name="file"; filename="a.png"\r\ncontent-type: image/png\r\n\r\n')
+    const chunked = new ReadableStream<Uint8Array>({
+      start: (c) => c.enqueue(head),
+      pull(c) {
+        if (pulled >= 10_000_000) return c.close()
+        pulled += 1024
+        c.enqueue(new Uint8Array(1024))
+      },
+    })
+    const res = await app.fetch(new Request('http://x/avatar', { method: 'POST', body: chunked, headers: { 'content-type': 'multipart/form-data; boundary=b' }, duplex: 'half' } as RequestInit))
+    assert.equal(res.status, 413)
+    assert.ok(pulled < 200_000, `stopped reading early (read ${pulled} bytes)`)
   })
 })
 

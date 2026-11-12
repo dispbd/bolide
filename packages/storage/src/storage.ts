@@ -150,13 +150,29 @@ export async function readUpload(request: Request, options: UploadOptions): Prom
   if (!/^multipart\/form-data\b/i.test(request.headers.get('content-type') ?? '')) {
     throw new HttpError(415, 'upload must be multipart/form-data')
   }
-  // The whole form is buffered by formData(), so refuse oversized requests before reading. Allow some room for the form's own parts.
-  const declared = Number(request.headers.get('content-length') ?? NaN)
-  if (declared > options.maxSize + 64 * 1024) throw new HttpError(413, `upload exceeds ${options.maxSize} bytes`)
+  // formData() buffers the whole form, so cap the bytes it can read. Content-Length can be missing
+  // (chunked) or wrong, so count them as they arrive. Allow some room for the form's own parts.
+  const limit = options.maxSize + 64 * 1024
+  const tooLarge = () => new HttpError(413, `upload exceeds ${options.maxSize} bytes`)
+  if (Number(request.headers.get('content-length') ?? 0) > limit) throw tooLarge()
+  let read = 0
+  let over = false
+  const counted = request.body?.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        read += chunk.byteLength
+        if (read > limit) {
+          over = true
+          controller.error(tooLarge())
+        } else controller.enqueue(chunk)
+      },
+    }),
+  )
   let form: FormData
   try {
-    form = await request.formData()
+    form = await new Request(request.url, { method: request.method, headers: request.headers, body: counted, duplex: 'half' } as RequestInit).formData()
   } catch {
+    if (over) throw tooLarge()
     throw new HttpError(400, 'upload is not a valid multipart form')
   }
   const file = form.get(field)

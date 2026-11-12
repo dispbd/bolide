@@ -15,7 +15,7 @@ describe('passwords', () => {
   })
 
   test('malformed or abusive hashes are a mismatch', async () => {
-    for (const bad of ['', 'bcrypt$x', 'scrypt$1024$8$1$c2FsdA', 'scrypt$1099511627776$8$1$c2FsdA$a2V5', 'scrypt$1024$8$1$c2FsdA$a2V5$x']) {
+    for (const bad of ['', 'bcrypt$x', 'scrypt$1024$8$1$c2FsdA', 'scrypt$1099511627776$8$1$c2FsdA$a2V5', 'scrypt$1024$8$1$c2FsdA$a2V5$x', ...['3$8$1', '1048576$32$1', '0$8$1'].map((nrp) => `scrypt$${nrp}$c2FsdA$${'A'.repeat(43)}`)]) {
       assert.equal(await verifyPassword('x', bad), false, bad)
     }
   })

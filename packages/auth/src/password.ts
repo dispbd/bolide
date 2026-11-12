@@ -29,10 +29,11 @@ export async function hashPassword(password: string, options: HashOptions = {}):
 function parseHash(stored: string) {
   const [alg, N, r, p, salt, key, extra] = stored.split('$')
   if (alg !== 'scrypt' || !salt || !key || extra !== undefined) return undefined
-  const nums = [N, r, p].map(Number)
-  // Bounded so a tampered hash can't make verification allocate gigabytes.
-  if (!nums.every((n) => Number.isInteger(n) && n > 0) || nums[0]! > 2 ** 20 || nums[1]! > 32 || nums[2]! > 16) return undefined
-  return { N: nums[0]!, r: nums[1]!, p: nums[2]!, salt: Buffer.from(salt, 'base64url'), key: Buffer.from(key, 'base64url') }
+  const [n, rr, pp] = [N, r, p].map(Number) as [number, number, number]
+  if (![n, rr, pp].every((v) => Number.isInteger(v) && v > 0) || n < 2 || (n & (n - 1)) !== 0) return undefined
+  // Bounded so a tampered hash can't make verification allocate gigabytes (scrypt needs 128 * N * r bytes).
+  if (n > 2 ** 20 || rr > 32 || pp > 16 || 128 * n * rr > 256 * 1024 * 1024) return undefined
+  return { N: n, r: rr, p: pp, salt: Buffer.from(salt, 'base64url'), key: Buffer.from(key, 'base64url') }
 }
 
 /** True when `password` matches `stored`. A malformed hash is a mismatch, not an error. */

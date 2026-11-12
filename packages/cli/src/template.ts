@@ -178,8 +178,8 @@ import { buildApp } from './app.ts'
 import { ServerConfig } from './config.ts'
 
 const app = await buildApp()
-const { port } = await listen(app, { port: app.get(ServerConfig).port })
-console.log(\`Listening on http://localhost:\${port}\`)
+// Logs "listening on …"; LOG_LEVEL and LOG_FORMAT tune the output.
+await listen(app, { port: app.get(ServerConfig).port })
 `,
 
     'test/users.test.ts': `import assert from 'node:assert/strict'
@@ -187,7 +187,7 @@ import { test } from 'node:test'
 import { buildApp } from '../src/app.ts'
 
 test('create and fetch a user', async () => {
-  const app = await buildApp({ env: {} })
+  const app = await buildApp({ env: { LOG_LEVEL: 'warn' } })
   try {
     const created = await app.fetch(
       new Request('http://test/users', {

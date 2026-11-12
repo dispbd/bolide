@@ -2,6 +2,7 @@ import { AppEnv, processEnv, type Env } from './config.ts'
 import { Container, type Override } from './container.ts'
 import { buildHttp, CurrentRequest, type ErrorReporter, type RouteInfo } from './http.ts'
 import { BolideError } from './errors.ts'
+import { createLogger, isLogLevel, Log, RequestId, RequestLog, type Logger } from './log.ts'
 import type { Use } from './middleware.ts'
 import type { Module } from './module.ts'
 import { openApiDocument, type OpenApiOptions } from './openapi.ts'
@@ -13,8 +14,15 @@ export interface AppOptions {
   overrides?: readonly Override[]
   /** Environment for `AppEnv` and configs. Defaults to `process.env` where it exists. */
   env?: Env
-  /** Called for unexpected errors (the client gets a plain 500). Defaults to console.error. */
+  /** Called for unexpected errors (the client gets a plain 500). Defaults to logging them at `error` level. */
   onError?: ErrorReporter
+  /**
+   * The app's logger, injectable as `Log` (and `RequestLog` with the request id).
+   * Defaults to `LOG_LEVEL` (default `info`) and `LOG_FORMAT` (`json` in production, otherwise `pretty`) from the env.
+   */
+  logger?: Logger
+  /** Log one line per request (method, path, status, duration, request id). Default true. */
+  accessLog?: boolean
   /** Max request body size in bytes; larger bodies get 413. Default 1 MiB. */
   bodyLimit?: number
   /** Serve an OpenAPI 3.1 document built from the routes (at `/openapi.json` by default). */
@@ -36,13 +44,19 @@ export interface App {
 
 /** Validates the module graph, starts every singleton and returns a ready app. */
 export async function createApp(options: AppOptions): Promise<App> {
+  const env = options.env ?? processEnv()
+  const logger = options.logger ?? defaultLogger(env)
   const container = new Container({
     modules: options.modules,
-    builtins: [CurrentRequest, AppEnv],
-    // Later overrides win, so a user override of AppEnv beats `env`.
-    overrides: [{ provide: AppEnv, useValue: options.env ?? processEnv() }, ...(options.overrides ?? [])],
+    builtins: [CurrentRequest, AppEnv, Log, RequestId, RequestLog],
+    // Later overrides win, so a user override of AppEnv or Log beats `env` and `logger`.
+    overrides: [{ provide: AppEnv, useValue: env }, { provide: Log, useValue: logger }, ...(options.overrides ?? [])],
   })
-  const onError = options.onError ?? ((e, req) => console.error(`[bolide] ${req.method} ${req.url}`, e))
+  // Through the container, so an override of Log in `overrides` is honored too.
+  const log = () => container.get(Log)
+  const onError: ErrorReporter =
+    options.onError ??
+    ((e, req, { requestId }) => log().error('unhandled error', { err: e, reqId: requestId, method: req.method, url: req.url }))
   const bodyLimit = options.bodyLimit ?? 1024 * 1024
   if (!(bodyLimit === Infinity || (Number.isInteger(bodyLimit) && bodyLimit >= 0))) {
     throw new BolideError(`bodyLimit must be a non-negative integer (bytes) or Infinity, got ${bodyLimit}.`)
@@ -54,6 +68,7 @@ export async function createApp(options: AppOptions): Promise<App> {
     bodyLimit,
     use,
     prelude: openapi && ((routes) => serveOpenApi(routes, openapi)),
+    accessLog: (options.accessLog ?? true) ? log : undefined,
   })
   await container.start()
   return {
@@ -62,6 +77,14 @@ export async function createApp(options: AppOptions): Promise<App> {
     routes: http.routes,
     close: () => container.stop(),
   }
+}
+
+function defaultLogger(env: Env) {
+  const level = env.LOG_LEVEL || 'info'
+  if (!isLogLevel(level)) throw new BolideError(`LOG_LEVEL must be debug, info, warn or error, got "${level}".`)
+  const format = env.LOG_FORMAT || (env.NODE_ENV === 'production' ? 'json' : 'pretty')
+  if (format !== 'json' && format !== 'pretty') throw new BolideError(`LOG_FORMAT must be json or pretty, got "${format}".`)
+  return createLogger({ level, format })
 }
 
 /**

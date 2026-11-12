@@ -50,11 +50,12 @@ describe('bolide create', () => {
     assert.equal(await readFile(join(dir, 'keep.txt'), 'utf8'), 'x')
   })
 
-  test('links published versions by default', async () => {
+  test('pins published versions to the CLI version by default', async () => {
     const { dir } = await create({ dir: join(tmp, 'published') })
     const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
-    assert.equal(pkg.dependencies['@bolide/core'], 'latest')
-    assert.equal(pkg.devDependencies['@bolide/cli'], 'latest')
+    const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+    assert.equal(pkg.dependencies['@bolide/core'], `^${version}`)
+    assert.equal(pkg.devDependencies['@bolide/cli'], `^${version}`)
   })
 })
 
@@ -65,6 +66,18 @@ describe('arguments', () => {
       assert.equal(await run(argv, () => {}, err.log), 2, argv.join(' '))
       assert.match(err.text(), /Usage: bolide/)
     }
+  })
+
+  test('a file as target or a wrong --local path explains the mistake', async () => {
+    await mkdir(tmp, { recursive: true })
+    const file = join(tmp, 'a-file.txt')
+    await writeFile(file, 'x')
+    let err = capture()
+    assert.equal(await run(['create', file], () => {}, err.log), 1)
+    assert.match(err.text(), /is a file/)
+    err = capture()
+    assert.equal(await run(['create', join(tmp, 'x'), '--local', join(tmp, 'nope')], () => {}, err.log), 1)
+    assert.match(err.text(), /not a Bolide checkout/)
   })
 
   test('help exits 0', async () => {

@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { CliError } from './errors.ts'
@@ -18,15 +19,21 @@ export interface CreateOptions {
 export async function create(options: CreateOptions) {
   const dir = resolve(options.dir)
   const name = packageName(basename(dir))
+  const local = options.local && resolve(options.local)
+  if (local && !existsSync(join(local, 'packages', 'core', 'package.json'))) {
+    throw new CliError(`--local ${local} is not a Bolide checkout (no packages/core/package.json there).`)
+  }
   const existing = await readdir(dir).catch((e: NodeJS.ErrnoException) => {
     if (e.code === 'ENOENT') return []
+    if (e.code === 'ENOTDIR') throw new CliError(`${dir} is a file. Pick a directory name.`)
+    if (e.code === 'EACCES') throw new CliError(`can't read ${dir}: permission denied.`)
     throw e
   })
   if (existing.length && !options.force) {
     throw new CliError(`${dir} is not empty. Pick another directory or pass --force to write into it.`)
   }
-  const local = options.local && resolve(options.local)
-  const link = (pkg: string) => (local ? `file:${relative(dir, join(local, 'packages', pkg)).split(sep).join('/')}` : 'latest')
+  // Core and CLI are released together, so a project pins the version that generated it.
+  const link = (pkg: string) => (local ? `file:${relative(dir, join(local, 'packages', pkg)).split(sep).join('/')}` : `^${cliVersion()}`)
   const files = template({ name, core: link('core'), cli: link('cli') })
   for (const [path, content] of Object.entries(files)) {
     const target = join(dir, path)
@@ -44,4 +51,9 @@ function packageName(dirName: string) {
     .replace(/^[._-]+|-+$/g, '')
   if (!name) throw new CliError(`can't derive a package name from "${dirName}". Use a directory name with letters or digits.`)
   return name
+}
+
+function cliVersion(): string {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+  return pkg.version
 }

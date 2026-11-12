@@ -25,7 +25,8 @@ npm run typecheck   # tsc, including packages/core/test/types.check.ts
 npm test            # builds, then unit tests (node:test via tsx, sources via the bolide-source condition)
 npm run build       # tsc -> packages/*/dist (what npm consumers get); core builds first
 npm run pack:check  # packs the packages, installs them into a fresh `bolide create` project, typechecks and tests it
-npm run db:up && npm run test:int   # spike integration tests: Postgres + Electric in Docker
+npm run db:up && npm run test:int   # integration tests: Postgres (+ Electric in Docker for the spike)
+npm run test:int:packages           # only the drivers' tests in packages/*/test/int (needs Postgres, DATABASE_URL)
 ```
 
 Packages export `dist/` to consumers and `src/` under the `bolide-source` condition, which the repo's tsconfig and test scripts enable. Relative imports use `.ts` extensions; the build rewrites them.

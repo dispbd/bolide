@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -17,6 +17,7 @@ const tgz = (name) => 'file:../' + fs.readdirSync('..').find((f) => f.startsWith
 p.dependencies['@bolide/core'] = tgz('core')
 p.devDependencies['@bolide/cli'] = tgz('cli')
 p.dependencies['@bolide/cache'] = tgz('cache')
+p.dependencies['@bolide/queue'] = tgz('queue')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
@@ -33,6 +34,13 @@ defineService({ name: 'y', inject: { cache: Cache }, factory: async ({ cache }) 
   await cache.set('k', 1, { ttl: '5 minutes' })
   return cache.wrap('k', () => 1)
 } })
+import { defineJob, Queue } from '@bolide/queue'
+const Ping = defineJob({ name: 'ping', handler: () => {} })
+defineService({ name: 'z', inject: { queue: Queue }, factory: async ({ queue }) => {
+  await queue.enqueue(Ping)
+  // @ts-expect-error Ping takes no payload
+  await queue.enqueue(Ping, { x: 1 })
+} })
 TS
 npm run typecheck --silent
 rm src/types-check.ts
@@ -42,6 +50,14 @@ const { createApp, createLogger } = await import('@bolide/core')
 const { Cache, cacheModule } = await import('@bolide/cache')
 const app = await createApp({ modules: [cacheModule()], logger: createLogger({ level: 'error' }) })
 if ((await app.get(Cache).wrap('k', () => 42)) !== 42) process.exit(1)
+const { defineJob, Queue, queueModule } = await import('@bolide/queue')
+let ran = 0
+const Ping = defineJob({ name: 'ping', handler: () => void ran++ })
+const q = await createApp({ modules: [queueModule({ jobs: [Ping] })], logger: createLogger({ level: 'error' }) })
+await q.get(Queue).enqueue(Ping)
+await q.get(Queue).idle()
+await q.close()
+if (ran !== 1) process.exit(1)
 "
 npm test --silent
 

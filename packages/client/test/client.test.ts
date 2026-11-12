@@ -205,12 +205,23 @@ describe('client', () => {
 
     let tries = 0
     const offline = setup(() => (tries++, 'offline'))
-    offline.client.mutate(archive, {})
+    const unsent = offline.client.mutate(archive, {})
     await new Promise((r) => setTimeout(r, 10))
     offline.client.close()
+    await assert.rejects(unsent.done, (e) => e instanceof MutationRejected && e.code === 'closed')
     const after = tries
     await new Promise((r) => setTimeout(r, 30))
     assert.equal(tries, after, 'no more attempts after close')
+
+    // Sent but not yet synced back: rejected too, never reported as confirmed.
+    const waiting = setup()
+    waiting.sinks.get('todos.mine')!.upToDate()
+    const sent = waiting.client.mutate(create, { id: crypto.randomUUID(), title: 'y' })
+    await new Promise((r) => setTimeout(r, 5))
+    assert.equal(sent.status, 'sent')
+    waiting.client.close()
+    await assert.rejects(sent.done, (e) => e instanceof MutationRejected && e.code === 'closed')
+    assert.equal(sent.status, 'rejected')
   })
 
   test('a stream outlives an unsubscribe that is followed at once by a subscribe', async () => {

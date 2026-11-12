@@ -453,6 +453,7 @@ export function createClient(options: ClientOptions) {
       })
     }
     if (txid !== undefined) seenTxids.delete(txid)
+    if (closed) return // close() already rejected it
     p.status = 'confirmed'
     await finish(p)
     p.settle.resolve()
@@ -463,9 +464,15 @@ export function createClient(options: ClientOptions) {
     shape,
     /** Mutations not yet confirmed, oldest first. */
     pending: () => pending.map((p) => p.handle) as readonly Mutation[],
-    /** Stops every shape stream and stops sending: unsent mutations stay unsent. */
+    /** Stops every shape stream and stops sending. Unconfirmed mutations reject with code `closed`. */
     close() {
       closed = true
+      // Unconfirmed mutations end here: `done` must neither hang nor claim a sync that didn't happen.
+      for (const p of pending.splice(0)) {
+        if (p.status === 'rejected' || p.status === 'confirmed') continue
+        p.status = 'rejected'
+        p.settle.reject(new MutationRejected('the client was closed before the server confirmed this change', 0, 'closed'))
+      }
       for (const wake of [...naps]) wake()
       for (const done of [...txidWaiters.values()]) done()
       for (const s of shapes.values()) {

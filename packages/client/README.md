@@ -45,4 +45,6 @@ In Node (tests, server rendering), Electric's client keeps a 60-second timer aft
 
 The store is our own rather than TanStack DB's: it is smaller (client, data layer and Electric client are about 23 KB minified and gzipped) and lets pending mutations be replayed by running the mutators again, not by patching rows.
 
+`client.close()` stops the streams and the sending. Mutations not yet confirmed reject with code `closed`.
+
 Not yet: keeping pending mutations across page reloads (phase 4), queries across shapes.

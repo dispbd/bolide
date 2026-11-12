@@ -428,6 +428,8 @@ export function createClient(options: ClientOptions) {
         }
         delay = retryInitial
         const body = (await res.json().catch(() => ({}))) as { txid?: string; error?: string; message?: string }
+        // close() already rejected it while the request was in flight.
+        if (closed) return
         if (!res.ok) {
           reject(p, new MutationRejected(body.message ?? res.statusText, res.status, body.error ?? `http_${res.status}`))
           await finish(p)

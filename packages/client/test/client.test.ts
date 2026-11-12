@@ -231,6 +231,18 @@ describe('client', () => {
     for (const m of [now, later]) await assert.rejects(m.done, (e) => e instanceof MutationRejected && e.code === 'closed')
     assert.deepEqual(quick.rejected, ['todos.archive: closed', 'todos.archive: closed'], 'onRejected hears about it')
     assert.deepEqual(quick.sent, [])
+
+    // In flight when closed: the late answer changes nothing.
+    let answer!: (r: Response) => void
+    const slow = setup(() => new Promise<Response>((r) => (answer = r)))
+    const flying = slow.client.mutate(archive, {})
+    await new Promise((r) => setTimeout(r, 5))
+    slow.client.close()
+    answer(Response.json({ error: 'forbidden', message: 'no' }, { status: 403 }))
+    await assert.rejects(flying.done, (e) => e instanceof MutationRejected && e.code === 'closed')
+    await new Promise((r) => setTimeout(r, 5))
+    assert.equal(flying.status, 'rejected')
+    assert.deepEqual(slow.rejected, ['todos.archive: closed'], 'onRejected once')
   })
 
   test('a stream outlives an unsubscribe that is followed at once by a subscribe', async () => {

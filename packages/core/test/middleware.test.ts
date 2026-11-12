@@ -90,6 +90,20 @@ describe('middleware', () => {
     assert.deepEqual(statuses, [500, 410])
   })
 
+  test('errors from an inner guard reach outer middleware as responses', async () => {
+    const statuses: number[] = []
+    const logger = defineMiddleware({ name: 'logger', handle: async (_ctx, next) => {
+      const res = await next()
+      statuses.push(res.status)
+      return res
+    } })
+    const deny = defineGuard({ name: 'deny', check: () => false })
+    const m = defineModule({ name: 'm', use: [logger], routes: [defineRoute({ method: 'GET', path: '/x', use: [deny], handler: () => 1 })] })
+    const app = await createApp({ modules: [m] })
+    assert.equal((await get(app, '/x')).status, 403)
+    assert.deepEqual(statuses, [403])
+  })
+
   test('middleware shares request-scoped instances with the handler', async () => {
     let made = 0
     const RequestId = defineService({ name: 'RequestId', scope: 'request', inject: { req: CurrentRequest }, factory: ({ req }) => ({ id: req.headers.get('x-id') ?? `gen-${++made}` }) })

@@ -62,7 +62,7 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
       hono.on(route.method, path, async (c) => {
         const request = c.req.raw
         const { scope } = c.env as { scope: RequestScope }
-        // Errors inside the chain become responses at each level, so middleware sees them as responses.
+        // The handler's errors become responses here, so middleware always sees a Response.
         const handle = async () => {
           try {
             const ctx = {
@@ -78,7 +78,7 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
           }
         }
         try {
-          return await runChain(uses, { request, route: info }, scope, handle)
+          return await runChain(uses, { request, route: info }, scope, onError, handle)
         } catch (e) {
           return errorResponse(e, request, onError)
         }
@@ -93,7 +93,7 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
   const fetch = async (request: Request) => {
     const scope = container.createScope(new Map<AnyService, unknown>([[CurrentRequest, request]]))
     try {
-      return await runChain(appUse, { request }, scope, async () => prelude?.(request) ?? (await hono.fetch(request, { scope })))
+      return await runChain(appUse, { request }, scope, onError, async () => prelude?.(request) ?? (await hono.fetch(request, { scope })))
     } catch (e) {
       return errorResponse(e, request, onError)
     } finally {
@@ -104,25 +104,38 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
   return { fetch, routes }
 }
 
-/** Runs middleware and guards in order around `inner`. */
-async function runChain(uses: readonly Use[], ctx: MiddlewareContext, scope: RequestScope, inner: () => Promise<Response>) {
+/**
+ * Runs middleware and guards in order around `inner`. Every layer turns its own errors into
+ * responses, so `await next()` always resolves to a Response, whatever failed further in.
+ */
+async function runChain(
+  uses: readonly Use[],
+  ctx: MiddlewareContext,
+  scope: RequestScope,
+  onError: ErrorReporter,
+  inner: () => Promise<Response>,
+) {
   const step = async (i: number): Promise<Response> => {
-    const u = uses[i]
-    if (!u) return inner()
-    const deps = await scope.resolveAll(u.inject)
-    if (u.kind === 'guard') {
-      if (!(await u.check(ctx, deps))) throw new HttpError(403, `access denied by guard "${u.name}"`)
-      return step(i + 1)
+    try {
+      const u = uses[i]
+      if (!u) return await inner()
+      const deps = await scope.resolveAll(u.inject)
+      if (u.kind === 'guard') {
+        if (!(await u.check(ctx, deps))) throw new HttpError(403, `access denied by guard "${u.name}"`)
+        return await step(i + 1)
+      }
+      let called = false
+      const next = () => {
+        if (called) throw new BolideError(`middleware "${u.name}" called next() twice.`)
+        called = true
+        return step(i + 1)
+      }
+      const res = await u.handle(ctx, next, deps)
+      if (!(res instanceof Response)) throw new BolideError(`middleware "${u.name}" must return a Response (usually the one from next()).`)
+      return res
+    } catch (e) {
+      return errorResponse(e, ctx.request, onError)
     }
-    let called = false
-    const next = () => {
-      if (called) throw new BolideError(`middleware "${u.name}" called next() twice.`)
-      called = true
-      return step(i + 1)
-    }
-    const res = await u.handle(ctx, next, deps)
-    if (!(res instanceof Response)) throw new BolideError(`middleware "${u.name}" must return a Response (usually the one from next()).`)
-    return res
   }
   return step(0)
 }

@@ -31,6 +31,8 @@ export class Container {
   private readonly visible = new Map<Module, Set<AnyService>>()
   private readonly replaced = new Map<AnyService, Override>()
   private readonly builtins: Set<AnyService>
+  /** What app-wide middleware sees: built-ins, globals and the exports of the app's modules. */
+  private readonly rootVisible: Set<AnyService>
   private readonly singletons = new Map<AnyService, unknown>()
   private readonly initOrder: AnyService[] = []
   private state: 'new' | 'starting' | 'started' | 'stopped' = 'new'
@@ -50,6 +52,8 @@ export class Container {
     }
     const globals = new Set<AnyService>()
     for (const m of this.modules) if (m.global) for (const s of exported(m)) globals.add(s)
+    this.rootVisible = new Set([...this.builtins, ...globals])
+    for (const m of options.modules) for (const s of exported(m)) this.rootVisible.add(s)
     for (const m of this.modules) {
       const v = new Set<AnyService>([...this.builtins, ...globals, ...m.providers])
       for (const i of m.imports) for (const s of exported(i)) v.add(s)
@@ -65,7 +69,11 @@ export class Container {
         }
       }
       for (const p of m.providers) this.checkDeps(m, p)
-      for (const r of m.routes) this.checkDeps(m, { name: `${r.method} ${m.prefix}${r.path}`, inject: r.inject }, 'route')
+      for (const r of m.routes) {
+        this.checkDeps(m, { name: `${r.method} ${m.prefix}${r.path}`, inject: r.inject }, 'route')
+        for (const u of r.use) this.checkDeps(m, u, u.kind)
+      }
+      for (const u of m.use) this.checkDeps(m, u, u.kind)
     }
     this.checkCycles()
   }
@@ -89,6 +97,18 @@ export class Container {
         const by = overridden ? `"${consumer.name}" (overridden by "${effective.name}")` : `"${consumer.name}"`
         throw new DependencyError(`singleton ${by} cannot inject request-scoped "${dep.name}". Make it request-scoped too.`)
       }
+    }
+  }
+
+  /** Throws unless app-wide middleware can see each of its dependencies. */
+  checkRootDeps(consumer: { name: string; kind: string; inject: Record<string, AnyService> }) {
+    for (const dep of Object.values(consumer.inject)) {
+      if (this.rootVisible.has(dep)) continue
+      const where = this.owner.get(dep)
+      const hint = where
+        ? `export it from "${where.name}" (and pass that module to createApp), or make "${where.name}" global.`
+        : 'no module provides it; add it to a module passed to createApp and export it.'
+      throw new DependencyError(`app ${consumer.kind} "${consumer.name}" injects "${dep.name}", which is not visible: ${hint}`)
     }
   }
 

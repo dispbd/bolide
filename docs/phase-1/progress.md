@@ -11,9 +11,10 @@ Goal (from the [roadmap](../roadmap.md)): router on Web standards, `defineModule
 | Routes and validation | `phase-1-http` | `defineRoute` with typed params/query/body, Hono behind an adapter, error mapping, `CurrentRequest`, `listen()` for Node. |
 | Typed config | `phase-1` | `defineConfig` with any Standard Schema, `AppEnv`, every problem listed at boot. |
 | CLI | `phase-1-cli` | `@bolide/cli`: `bolide create <dir>` (users module, config, test, OpenAPI; `--local` links a checkout) and `bolide dev` (Node `--watch` + tsx, `--port`). Tests generate a project, typecheck it, run its test, and check that `dev` restarts on change. |
+| Middleware and guards | `phase-1-middleware` | `defineMiddleware` / `defineGuard` with typed, request-scoped deps; `use` on the app, modules and routes; boot-time visibility checks. App middleware also wraps 404s and the OpenAPI document. |
 | OpenAPI | `phase-1-openapi` | OpenAPI 3.1 from route schemas through Standard JSON Schema; served by `createApp({ openapi })`. Routes gain `response` (types the return value), `status` and doc fields. |
 
-Size: `@bolide/core` with Hono is 31.6 KB minified, 12.4 KB gzipped (OpenAPI added about 2 KB gzipped). 74 tests plus compile-time type checks.
+Size: `@bolide/core` with Hono is about 13.3 KB gzipped (OpenAPI added about 2 KB, middleware about 1 KB). 86 tests plus compile-time type checks.
 
 ## Review fixes (PR #3)
 
@@ -21,5 +22,4 @@ The first AI review found three blocking issues, all fixed: `listen()` now rejec
 
 ## Next
 
-- Middleware and guards: the extension point that phase 2 (auth) needs.
 - A build step so the package can be published (today it exports TypeScript sources).

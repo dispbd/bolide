@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
-import type { Container } from './container.ts'
+import type { Container, RequestScope } from './container.ts'
 import { BolideError, HttpError, ValidationError } from './errors.ts'
+import type { MiddlewareContext, Use } from './middleware.ts'
 import type { Module } from './module.ts'
 import type { AnyRoute, Method } from './route.ts'
 import { parse, type StandardSchemaV1 } from './schema.ts'
@@ -31,6 +32,10 @@ export type ErrorReporter = (error: unknown, request: Request) => void
 export interface HttpOptions {
   /** Max request body size in bytes for routes with a `body` schema. Larger bodies get 413. */
   bodyLimit: number
+  /** App-wide middleware and guards: they run for every request, before routing. */
+  use?: readonly Use[]
+  /** Answers some requests before routing (the OpenAPI document), still inside app middleware. */
+  prelude?: (routes: readonly RouteInfo[]) => (request: Request) => Response | undefined
 }
 
 export function buildHttp(container: Container, modules: readonly Module[], onError: ErrorReporter, options: HttpOptions) {
@@ -52,30 +57,74 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
       seen.set(key, { module: m.name, path })
       routes.push({ method: route.method, path, module: m.name, route })
 
+      const uses = [...m.use, ...route.use]
+      const info = { method: route.method, path, module: m.name }
       hono.on(route.method, path, async (c) => {
         const request = c.req.raw
-        const scope = container.createScope(new Map<AnyService, unknown>([[CurrentRequest, request]]))
-        try {
-          const ctx = {
-            params: await input('params', route.params, c.req.param()),
-            query: await input('query', route.query, c.req.query()),
-            body: route.body ? await input('body', route.body, await readJson(request, options.bodyLimit)) : undefined,
-            request,
+        const { scope } = c.env as { scope: RequestScope }
+        // Errors inside the chain become responses at each level, so middleware sees them as responses.
+        const handle = async () => {
+          try {
+            const ctx = {
+              params: await input('params', route.params, c.req.param()),
+              query: await input('query', route.query, c.req.query()),
+              body: route.body ? await input('body', route.body, await readJson(request, options.bodyLimit)) : undefined,
+              request,
+            }
+            const deps = await scope.resolveAll(route.inject)
+            return toResponse(await route.handler(ctx as never, deps), route.status)
+          } catch (e) {
+            return errorResponse(e, request, onError)
           }
-          const deps = await scope.resolveAll(route.inject)
-          return toResponse(await route.handler(ctx as never, deps), route.status)
+        }
+        try {
+          return await runChain(uses, { request, route: info }, scope, handle)
         } catch (e) {
           return errorResponse(e, request, onError)
-        } finally {
-          // Request-scoped instances end when the handler returns, before a streamed body is read.
-          await scope.dispose().catch((e) => onError(e, request))
         }
       })
     }
   }
 
   hono.notFound((c) => Response.json({ error: 'not_found', message: `no route for ${c.req.method} ${new URL(c.req.url).pathname}` }, { status: 404 }))
-  return { fetch: (req: Request) => hono.fetch(req), routes }
+
+  const prelude = options.prelude?.(routes)
+  const appUse = options.use ?? []
+  const fetch = async (request: Request) => {
+    const scope = container.createScope(new Map<AnyService, unknown>([[CurrentRequest, request]]))
+    try {
+      return await runChain(appUse, { request }, scope, async () => prelude?.(request) ?? (await hono.fetch(request, { scope })))
+    } catch (e) {
+      return errorResponse(e, request, onError)
+    } finally {
+      // Request-scoped instances end when the handler returns, before a streamed body is read.
+      await scope.dispose().catch((e) => onError(e, request))
+    }
+  }
+  return { fetch, routes }
+}
+
+/** Runs middleware and guards in order around `inner`. */
+async function runChain(uses: readonly Use[], ctx: MiddlewareContext, scope: RequestScope, inner: () => Promise<Response>) {
+  const step = async (i: number): Promise<Response> => {
+    const u = uses[i]
+    if (!u) return inner()
+    const deps = await scope.resolveAll(u.inject)
+    if (u.kind === 'guard') {
+      if (!(await u.check(ctx, deps))) throw new HttpError(403, `access denied by guard "${u.name}"`)
+      return step(i + 1)
+    }
+    let called = false
+    const next = () => {
+      if (called) throw new BolideError(`middleware "${u.name}" called next() twice.`)
+      called = true
+      return step(i + 1)
+    }
+    const res = await u.handle(ctx, next, deps)
+    if (!(res instanceof Response)) throw new BolideError(`middleware "${u.name}" must return a Response (usually the one from next()).`)
+    return res
+  }
+  return step(0)
 }
 
 async function input(where: string, schema: StandardSchemaV1 | undefined, value: unknown) {

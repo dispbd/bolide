@@ -179,8 +179,10 @@ export const Sessions = defineMiddleware({
   handle: async ({ request }, next, { state, settings }) => {
     state.middleware = true
     const origin = request.headers.get('origin')
-    if (origin && unsafeMethods.has(request.method) && !sameHost(origin, request.url) && !settings.trustedOrigins.includes(origin)) {
-      throw new HttpError(403, `cross-origin ${request.method} from ${origin} is not allowed`, undefined, 'cross_origin')
+    if (unsafeMethods.has(request.method)) {
+      // Without Origin, a browser's Sec-Fetch-Site still tells a cross-site request apart.
+      const crossSite = origin ? !sameHost(origin, request.url) && !settings.trustedOrigins.includes(origin) : request.headers.get('sec-fetch-site') === 'cross-site'
+      if (crossSite) throw new HttpError(403, `cross-origin ${request.method} from ${origin ?? 'another site'} is not allowed`, undefined, 'cross_origin')
     }
     let res = await next()
     if (state.cookie) {

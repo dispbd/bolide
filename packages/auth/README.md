@@ -33,7 +33,9 @@ const app = await createApp({ modules: [authModule({ store: redisStore(redis) })
 
 ## CSRF
 
-Cookies with `SameSite=Lax` are not sent on cross-site POSTs, Bolide routes with a body only accept JSON (which a plain HTML form can't send), and `Sessions` rejects POST, PUT, PATCH and DELETE whose `Origin` names another host with 403 `cross_origin`. List other front ends in `trustedOrigins: ['https://admin.example.com']`. Hosts are compared rather than full origins, so an app behind a TLS-terminating proxy still works.
+Cookies with `SameSite=Lax` are not sent on cross-site POSTs, Bolide routes with a body only accept JSON (which a plain HTML form can't send), and `Sessions` rejects POST, PUT, PATCH and DELETE whose `Origin` names another host with 403 `cross_origin`. List other front ends in `trustedOrigins: ['https://admin.example.com']`. Hosts are compared rather than full origins, so an app behind a TLS-terminating proxy still works. When a request has no `Origin`, a browser's `Sec-Fetch-Site: cross-site` is refused the same way.
+
+The check compares `Origin` with the host in the request URL, so a proxy must pass the original `Host` through (nginx: `proxy_set_header Host $host;`). If a proxy rewrites it to an internal name, same-site requests get 403: fix the proxy, or list your public origin in `trustedOrigins`.
 
 ## Stores
 

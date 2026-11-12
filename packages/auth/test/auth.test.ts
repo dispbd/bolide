@@ -151,6 +151,8 @@ describe('sessions', () => {
     assert.equal((await c.send('POST', '/login', { name: 'ann', password: 'secret' }, { origin: 'https://app.test' })).status, 200, 'same host behind TLS termination')
     assert.equal((await c.send('POST', '/logout', undefined, { origin: 'https://admin.test' })).status, 204)
     assert.equal((await c.send('GET', '/me', undefined, { origin: 'https://evil.test' })).status, 200, 'safe methods pass')
+    assert.equal((await c.send('POST', '/logout', undefined, { 'sec-fetch-site': 'cross-site' })).status, 403, 'no Origin, but the browser says cross-site')
+    assert.equal((await c.send('POST', '/logout', undefined, { 'sec-fetch-site': 'same-origin' })).status, 204)
   })
 
   test('cookie options and bad settings', async () => {

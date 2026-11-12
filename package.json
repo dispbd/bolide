@@ -6,15 +6,15 @@
     "db:up": "bash scripts/db-up.sh",
     "db:down": "bash scripts/db-down.sh",
     "server": "tsx spike/server/main.ts",
-    "test": "LOG_LEVEL=warn tsx --conditions=bolide-source --test spike/core/*.test.ts packages/*/test/*.test.ts",
-    "test:int": "tsx --conditions=bolide-source --test spike/**/*.int.test.ts packages/*/test/int/*.test.ts",
-    "test:int:packages": "tsx --conditions=bolide-source --test packages/*/test/int/*.test.ts",
+    "test": "LOG_LEVEL=warn tsx --conditions=bolide-source --test spike/core/*.test.ts packages/*/test/*.test.ts examples/*/test/*.test.ts",
+    "test:int": "tsx --conditions=bolide-source --test --test-force-exit spike/**/*.int.test.ts packages/*/test/int/*.test.ts examples/*/test/*.test.ts",
+    "test:int:packages": "tsx --conditions=bolide-source --test --test-force-exit packages/*/test/int/*.test.ts examples/*/test/*.test.ts",
     "bench": "tsx spike/bench/latency.ts",
     "bundle-size": "node spike/bench/bundle-size.mjs",
     "typecheck": "tsc --noEmit",
     "pretest:core": "npm run build",
     "test:core": "LOG_LEVEL=warn tsx --conditions=bolide-source --test packages/*/test/*.test.ts",
-    "build": "npm run build -w @bolide/core && npm run build -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/storage -w @bolide/i18n && npm run build -w @bolide/mail",
+    "build": "npm run build -w @bolide/core && npm run build -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/storage -w @bolide/i18n -w @bolide/data && npm run build -w @bolide/mail -w @bolide/client && npm run build -w @bolide/react -w @bolide/vue",
     "pretest": "npm run build",
     "pack:check": "bash scripts/pack-check.sh"
   },
@@ -30,9 +30,16 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "esbuild": "^0.28.2",
+    "happy-dom": "^21.0.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "tsx": "^4.23.15",
-    "typescript": "5.9"
+    "typescript": "5.9",
+    "valibot": "^1.5.0",
+    "vue": "^3.5.45"
   },
   "workspaces": [
     "packages/*"

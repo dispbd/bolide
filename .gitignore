@@ -4,3 +4,5 @@ dist/
 *.log
 .DS_Store
 packages/cli/test/.tmp/
+packages/cli/test/.tmp-db-*/
+packages/cli/templates/

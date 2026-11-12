@@ -1,0 +1,32 @@
+{
+  "name": "@bolide/react",
+  "version": "0.0.0",
+  "description": "React hooks for the Bolide client: live shapes and optimistic mutations",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@bolide/client": "0.0.0",
+    "@bolide/data": "0.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

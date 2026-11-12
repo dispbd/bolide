@@ -101,6 +101,8 @@ interface ShapeState {
   markReady: () => void
 }
 
+const closedError = () => new MutationRejected('the client was closed before the server confirmed this change', 0, 'closed')
+
 const keyOf = (table: AnyTable, row: Record<string, unknown>) => String(row[table.primaryKey])
 
 /**
@@ -356,17 +358,20 @@ export function createClient(options: ClientOptions) {
     }
     chain = chain.then(async () => {
       try {
+        if (closed) throw closedError()
         p.input = await checkInput(mutator, input)
+        if (closed) throw closedError()
         if (mutator.local) {
           const working = cloneView(view)
           await runLocal(p, working)
+          if (closed) throw closedError()
           view = working
         }
         pending.push(p)
         publish()
         void flush()
       } catch (e) {
-        reject(p, e instanceof MutatorError ? new MutationRejected(e.message, 0, e.code) : new MutationRejected(String((e as Error)?.message ?? e), 0, 'client_error'))
+        reject(p, e instanceof MutationRejected ? e : e instanceof MutatorError ? new MutationRejected(e.message, 0, e.code) : new MutationRejected(String((e as Error)?.message ?? e), 0, 'client_error'))
       } finally {
         markApplied()
       }
@@ -470,8 +475,7 @@ export function createClient(options: ClientOptions) {
       // Unconfirmed mutations end here: `done` must neither hang nor claim a sync that didn't happen.
       for (const p of pending.splice(0)) {
         if (p.status === 'rejected' || p.status === 'confirmed') continue
-        p.status = 'rejected'
-        p.settle.reject(new MutationRejected('the client was closed before the server confirmed this change', 0, 'closed'))
+        reject(p, closedError())
       }
       for (const wake of [...naps]) wake()
       for (const done of [...txidWaiters.values()]) done()

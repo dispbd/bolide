@@ -222,6 +222,15 @@ describe('client', () => {
     waiting.client.close()
     await assert.rejects(sent.done, (e) => e instanceof MutationRejected && e.code === 'closed')
     assert.equal(sent.status, 'rejected')
+
+    // Called and closed in the same tick, or called after close: rejected, never left hanging.
+    const quick = setup()
+    const now = quick.client.mutate(archive, {})
+    quick.client.close()
+    const later = quick.client.mutate(archive, {})
+    for (const m of [now, later]) await assert.rejects(m.done, (e) => e instanceof MutationRejected && e.code === 'closed')
+    assert.deepEqual(quick.rejected, ['todos.archive: closed', 'todos.archive: closed'], 'onRejected hears about it')
+    assert.deepEqual(quick.sent, [])
   })
 
   test('a stream outlives an unsubscribe that is followed at once by a subscribe', async () => {

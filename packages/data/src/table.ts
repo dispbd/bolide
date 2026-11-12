@@ -159,3 +159,19 @@ export function fromSqlRow<T extends AnyTable>(table: T, row: Record<string, unk
   for (const [k, def] of Object.entries(table.columns) as [string, { sqlName: string }][]) if (def.sqlName in row) out[k] = row[def.sqlName]
   return out as Row<T>
 }
+
+/**
+ * Brings values from a database driver or a sync stream to the row format: timestamps as ISO strings in UTC,
+ * dates as `YYYY-MM-DD`, decimals as strings. Works on keyed rows (after `fromSqlRow`).
+ */
+export function normalizeRow<T extends AnyTable>(table: T, row: Record<string, unknown>): Row<T> {
+  const out: Record<string, unknown> = { ...row }
+  for (const [k, def] of Object.entries(table.columns) as [string, ColumnDef][]) {
+    const v = out[k]
+    if (v === null || v === undefined) continue
+    if (def.kind === 'timestamp') out[k] = new Date(v instanceof Date ? v : String(v).replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')).toISOString()
+    else if (def.kind === 'date' && v instanceof Date) out[k] = `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`
+    else if (def.kind === 'numeric' && typeof v === 'number') out[k] = String(v)
+  }
+  return out as Row<T>
+}

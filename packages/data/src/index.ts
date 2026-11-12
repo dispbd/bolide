@@ -4,6 +4,7 @@ export {
   checkPatch,
   defineTable,
   fromSqlRow,
+  normalizeRow,
   SchemaError,
   snake,
   toSqlRow,
@@ -17,3 +18,15 @@ export {
   type RowOf,
   type Table,
 } from './table.ts'
+export {
+  checkInput,
+  defineMutator,
+  MutatorError,
+  type AnyMutator,
+  type Mutator,
+  type MutatorContext,
+  type MutatorErrorCode,
+  type MutatorInput,
+  type MutatorOptions,
+  type MutatorTx,
+} from './mutator.ts'

@@ -1,8 +1,8 @@
 # @bolide/data
 
-Tables, mutators and shapes that the server and the browser share. This package is the schema part: one table definition gives row types, validation and SQL. Mutators and shapes come next ([phase 3 plan](../../docs/phase-3/plan.md)).
+Tables, mutators and shapes that the server and the browser share. One table definition gives row types, validation and SQL; a mutator is a change written once and run both optimistically in the browser and for real on the server. Shapes (read permissions) and the browser client come next ([phase 3 plan](../../docs/phase-3/plan.md)).
 
-The root entry has no server code and no dependencies beyond Standard Schema types, so it is cheap in a browser bundle. Server-only helpers (SQL, migrations) are in `@bolide/data/server`.
+The root entry has no server code and no dependencies beyond Standard Schema types, so it is cheap in a browser bundle. Server-only parts (the mutation endpoint, SQL, migrations) are in `@bolide/data/server`, which needs `@bolide/core`.
 
 ## Tables
 
@@ -54,3 +54,57 @@ Migrations are plain SQL files named `0001_create_todos.sql`, `0002_add_due_date
 - holds an advisory lock, so app instances that start together don't migrate twice.
 
 `sql` is a [postgres.js](https://github.com/porsager/postgres) client, or anything with `unsafe(query, params)` and `begin(fn)`.
+
+## Mutators
+
+```ts
+import { defineMutator, MutatorError } from '@bolide/data'
+
+export const toggle = defineMutator({
+  name: 'todos.toggle',
+  input: z.object({ id: z.uuid() }),
+  async run({ tx, input, side, userId }) {
+    const todo = await tx.get(todos, input.id)
+    if (!todo) throw new MutatorError('not_found', 'no such todo')
+    // Rules the browser can't check run on the server only; a rejection rolls the browser back.
+    if (side === 'server' && todo.ownerId !== userId) throw new MutatorError('forbidden', 'not your todo')
+    await tx.update(todos, input.id, { done: !todo.done })
+  },
+})
+```
+
+- `tx.get`, `tx.insert`, `tx.update` and `tx.delete` take a table and are typed by it. Values are checked against the table on the server before they reach SQL. `tx.get` locks the row (`FOR UPDATE`), so read-then-write mutators don't lose concurrent changes.
+- `MutatorError` codes become HTTP statuses: `invalid_input` 400, `forbidden` 403, `not_found` 404, `conflict` 409. Any other error is a 500 and rolls the transaction back too.
+- `local: false` marks a mutator the browser can't run (it needs rows the browser doesn't have, or secrets): the browser sends it and waits.
+- Names are stable identifiers (`'todos.toggle'`): the browser sends them, so renaming one is a breaking change for open tabs.
+
+### On the server
+
+```ts
+import { dataModule, onServer } from '@bolide/data/server'
+
+const app = await createApp({
+  modules: [
+    dataModule({
+      sql,                       // postgres.js client, or a service token that provides one
+      tables: [todos, users],
+      mutators: [toggle, placeOrderOnServer],
+      userId: CurrentUserId,     // a request-scoped service: the signed-in user's id, or undefined
+    }),
+  ],
+})
+```
+
+`POST /api/data/mutate` takes `{ id, name, input }` and answers `{ txid }`. The browser waits for that transaction id on the sync stream before it drops its optimistic copy. The `id` is a uuid the browser picks: sending the same mutation again (a retry after a dropped connection) returns the first `txid` and doesn't apply it twice. These ids are kept in a `bolide_mutations` table, created at boot.
+
+`onServer(mutator, { inject, run })` gives a mutator a server-only body with injected services (payments, mail, secrets). The browser still runs the shared body optimistically; the server file and its imports never reach the bundle.
+
+```ts
+export const placeOrderOnServer = onServer(placeOrder, {
+  inject: { payments: Payments },
+  async run({ tx, input, userId }, { payments }) {
+    const charge = await payments.charge(userId!, input.total)
+    await tx.insert(orders, { id: input.id, userId: userId!, chargeId: charge.id })
+  },
+})
+```

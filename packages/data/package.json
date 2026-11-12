@@ -29,5 +29,13 @@
   },
   "engines": {
     "node": ">=20.6"
+  },
+  "peerDependencies": {
+    "@bolide/core": "0.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@bolide/core": {
+      "optional": true
+    }
   }
 }

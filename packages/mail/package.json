@@ -1,0 +1,39 @@
+{
+  "name": "@bolide/mail",
+  "version": "0.0.0",
+  "description": "Bolide mail: a Mailer service with memory, console, SMTP and HTTP transports",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./queue": {
+      "bolide-source": "./src/queue.ts",
+      "types": "./dist/queue.d.ts",
+      "default": "./dist/queue.js"
+    }
+  },
+  "peerDependencies": {
+    "@bolide/core": "0.0.0",
+    "@bolide/queue": "0.0.0"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "peerDependenciesMeta": {
+    "@bolide/queue": {
+      "optional": true
+    }
+  }
+}

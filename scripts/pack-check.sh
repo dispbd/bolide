@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -19,6 +19,7 @@ p.devDependencies['@bolide/cli'] = tgz('cli')
 p.dependencies['@bolide/cache'] = tgz('cache')
 p.dependencies['@bolide/queue'] = tgz('queue')
 p.dependencies['@bolide/auth'] = tgz('auth')
+p.dependencies['@bolide/mail'] = tgz('mail')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
@@ -62,6 +63,14 @@ if (ran !== 1) process.exit(1)
 const { authModule, hashPassword, Sessions, verifyPassword } = await import('@bolide/auth')
 if (!(await verifyPassword('pw', await hashPassword('pw', { cost: 1024 })))) process.exit(1)
 await createApp({ modules: [authModule()], use: [Sessions], logger: createLogger({ level: 'error' }) })
+const { Mailer, mailModule, memoryTransport } = await import('@bolide/mail')
+const { SendMail } = await import('@bolide/mail/queue')
+const transport = memoryTransport()
+const mq = await createApp({ modules: [mailModule({ transport, from: 'a@b.co' }), queueModule({ jobs: [SendMail] })], logger: createLogger({ level: 'error' }) })
+await mq.get(Queue).enqueue(SendMail, { to: 'c@d.co', subject: 's', text: 't' })
+await mq.get(Queue).idle()
+await mq.close()
+if (transport.sent.length !== 1) process.exit(1)
 "
 npm test --silent
 

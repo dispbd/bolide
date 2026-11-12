@@ -39,7 +39,9 @@ Mutators with `local: false` skip step 1's local run and change nothing until th
 
 ## Transports
 
-`electricTransport()` (from `@bolide/client/electric`, with `@electric-sql/client` as a peer dependency) speaks Electric's protocol to the app's own shape route, never to Electric directly. A transport is a small interface (`SyncTransport`), so the development mode without Docker and tests use their own.
+`electricTransport()` (from `@bolide/client/electric`, with `@electric-sql/client` as a peer dependency) speaks Electric's protocol to the app's own shape route, never to Electric directly. On the server, `postgresSync()` from `@bolide/data/server` speaks the same protocol from Postgres alone, for development without Docker. A transport is a small interface (`SyncTransport`), so tests can use their own.
+
+In Node (tests, server rendering), Electric's client keeps a 60-second timer after the last stream stops, which delays the process's exit. Run tests with `--test-force-exit`.
 
 The store is our own rather than TanStack DB's: it is smaller (client, data layer and Electric client are about 23 KB minified and gzipped) and lets pending mutations be replayed by running the mutators again, not by patching rows.
 

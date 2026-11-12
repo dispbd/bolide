@@ -46,4 +46,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The CLI's db commands load @bolide/data the way a project would, from dist.
+      - run: npm run build
       - run: npm run test:int:packages

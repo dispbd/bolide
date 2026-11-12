@@ -143,3 +143,26 @@ function freePort() {
     })
   })
 }
+
+describe('bolide db', () => {
+  test('db sql prints the tables a schema module exports', async () => {
+    const dir = join(tmp, 'db-sql')
+    await mkdir(join(dir, 'src'), { recursive: true })
+    await writeFile(
+      join(dir, 'src/schema.ts'),
+      `import { defineTable, t } from '@bolide/data'
+export const users = defineTable('users', { id: t.uuid().primaryKey() })
+export const posts = defineTable('posts', { id: t.uuid().primaryKey(), authorId: t.uuid().references(() => users) })
+export const notATable = { name: 'x' }
+`,
+    )
+    const out = execFileSync(process.execPath, [bin, 'db', 'sql'], { cwd: dir, encoding: 'utf8' })
+    assert.match(out, /create table "users"[\s\S]*create table "posts"[\s\S]*"author_id" uuid not null references "users" \("id"\)/)
+    const err = capture()
+    assert.equal(await run(['db', 'sql', 'src/nope.ts'], undefined, err.log), 1)
+    assert.match(err.text(), /nope.ts does not exist/)
+    assert.equal(await run(['db', 'migrate', '--dir', join(dir, 'nowhere')], undefined, err.log), 1)
+    assert.match(err.text(), /DATABASE_URL|nowhere does not exist/)
+    assert.equal(await run(['db', 'drop'], undefined, err.log), 2)
+  })
+})

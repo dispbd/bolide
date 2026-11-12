@@ -25,6 +25,7 @@ describe('passwords', () => {
     assert.equal(needsRehash(weak), true)
     assert.equal(needsRehash(weak, { cost: 1024 }), false)
     await assert.rejects(hashPassword('pw', { cost: 1000 }), RangeError)
+    for (const bad of [{ cost: 2 ** 19 }, { cost: 2 ** 21 }, { blockSize: 64 }, { parallelism: 17 }]) await assert.rejects(hashPassword('pw', bad), RangeError, JSON.stringify(bad))
   })
 })
 

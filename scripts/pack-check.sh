@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail -w @bolide/storage --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -20,6 +20,7 @@ p.dependencies['@bolide/cache'] = tgz('cache')
 p.dependencies['@bolide/queue'] = tgz('queue')
 p.dependencies['@bolide/auth'] = tgz('auth')
 p.dependencies['@bolide/mail'] = tgz('mail')
+p.dependencies['@bolide/storage'] = tgz('storage')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
@@ -71,6 +72,10 @@ await mq.get(Queue).enqueue(SendMail, { to: 'c@d.co', subject: 's', text: 't' })
 await mq.get(Queue).idle()
 await mq.close()
 if (transport.sent.length !== 1) process.exit(1)
+const { Storage, storageModule } = await import('@bolide/storage')
+const st = await createApp({ modules: [storageModule()], logger: createLogger({ level: 'error' }) })
+await st.get(Storage).put('a/b.txt', 'hi')
+if ((await st.get(Storage).text('a/b.txt')) !== 'hi') process.exit(1)
 "
 npm test --silent
 

@@ -131,3 +131,16 @@ dataModule({ sql, tables, mutators, shapes: [myTodos, directory], sync: electric
 ```
 
 `GET /api/data/shape/todos.mine` proxies the [Electric](https://electric-sql.com) shape protocol. Only Electric's own protocol params (`offset`, `handle`, `live`, `cursor`...) pass through from the browser. Cache headers become `private` with `Vary: cookie, authorization`, because the rows depend on who asks. For Electric Cloud, pass `sourceId` and `secret`; they stay on the server.
+
+### Without Electric: development and tests
+
+Electric is a separate service and needs `wal_level=logical`. For development and tests, `postgresSync(sql)` serves the same shape protocol from Postgres alone, so the browser keeps using `electricTransport()`:
+
+```ts
+import { dataModule, electric, postgresSync } from '@bolide/data/server'
+
+const sync = process.env.ELECTRIC_URL ? electric({ url: process.env.ELECTRIC_URL }) : postgresSync(sql)
+dataModule({ sql, tables, mutators, shapes, sync, userId: CurrentUserId })
+```
+
+The first time a shape of a table is asked for, it installs a trigger on that table that records each change, with its transaction id, in a `bolide_changes` table and wakes waiting long-polls with `NOTIFY`. `devSyncSql(tables)` returns that SQL if you'd rather put it in a migration (and pass `install: false`). Writers to synced tables take a shared lock until they commit, so changes are read in commit order; that serialises writes, which is the reason it is for development and tests only. Recorded changes are kept for a day (`keep`); a client further behind loads the shape again.

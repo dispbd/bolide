@@ -1,9 +1,11 @@
 import { parseArgs } from 'node:util'
 import { create } from './create.ts'
+import { db } from './db.ts'
 import { dev } from './dev.ts'
 import { CliError, UsageError } from './errors.ts'
 
 export { create, type CreateOptions } from './create.ts'
+export { db, type DbOptions } from './db.ts'
 export { dev, type DevOptions } from './dev.ts'
 export { CliError } from './errors.ts'
 
@@ -16,6 +18,11 @@ Commands:
   dev [entry]    Run the app and restart it when files change
                  (entry defaults to "bolide.entry" in package.json, then src/main.ts)
                  --port <n>      sets PORT for the app
+  db sql [schema]
+                 Print CREATE TABLE statements for the tables a module exports
+                 (schema defaults to "bolide.schema" in package.json, then src/schema.ts)
+  db migrate     Apply pending migrations/NNNN_name.sql files to DATABASE_URL
+                 --dir <path>    the migrations folder (default: migrations)
 
   help           Show this message`
 
@@ -52,6 +59,19 @@ export async function run(argv: string[], out = console.log, err = console.error
         }
         const child = dev({ entry: positionals[0], port, log: out })
         return await child.exited
+      }
+      case 'db': {
+        const [sub, ...args] = rest
+        const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { dir: { type: 'string' } } })
+        if (sub === 'sql') {
+          if (positionals.length > 1) throw new UsageError('db sql takes at most one schema module.')
+          return await db('sql', { schema: positionals[0] })
+        }
+        if (sub === 'migrate') {
+          if (positionals.length) throw new UsageError('db migrate takes no arguments; use --dir for another folder.')
+          return await db('migrate', { dir: values.dir })
+        }
+        throw new UsageError(sub ? `unknown db command "${sub}".` : 'db needs a command: sql or migrate.')
       }
       case undefined:
       case 'help':

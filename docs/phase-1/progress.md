@@ -12,9 +12,10 @@ Goal (from the [roadmap](../roadmap.md)): router on Web standards, `defineModule
 | Typed config | `phase-1` | `defineConfig` with any Standard Schema, `AppEnv`, every problem listed at boot. |
 | CLI | `phase-1-cli` | `@bolide/cli`: `bolide create <dir>` (users module, config, test, OpenAPI; `--local` links a checkout) and `bolide dev` (Node `--watch` + tsx, `--port`). Tests generate a project, typecheck it, run its test, and check that `dev` restarts on change. |
 | Middleware and guards | `phase-1-middleware` | `defineMiddleware` / `defineGuard` with typed, request-scoped deps; `use` on the app, modules and routes; boot-time visibility checks. App middleware also wraps 404s and the OpenAPI document. |
+| Build and packaging | `phase-1-build` | `tsc` emits `dist/` with declarations; exports point consumers at `dist/` and the repo at `src/` through the `bolide-source` condition. `npm run pack:check` installs the packed tarballs into a fresh `bolide create` project and runs its typecheck and test. CI workflow runs typecheck, tests and the pack check. |
 | OpenAPI | `phase-1-openapi` | OpenAPI 3.1 from route schemas through Standard JSON Schema; served by `createApp({ openapi })`. Routes gain `response` (types the return value), `status` and doc fields. |
 
-Size: `@bolide/core` with Hono is about 13.3 KB gzipped (OpenAPI added about 2 KB, middleware about 1 KB). 86 tests plus compile-time type checks.
+Size: `@bolide/core` with Hono is about 13.3 KB gzipped (OpenAPI added about 2 KB, middleware about 1 KB). 88 tests plus compile-time type checks.
 
 ## Review fixes (PR #3)
 
@@ -22,4 +23,4 @@ The first AI review found three blocking issues, all fixed: `listen()` now rejec
 
 ## Next
 
-- A build step so the package can be published (today it exports TypeScript sources).
+Phase 1 is complete. Publishing to npm waits for the npm org/scope decision; phase 2 (auth, sessions, mail, queues) builds on middleware and guards.

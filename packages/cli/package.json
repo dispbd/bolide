@@ -8,9 +8,25 @@
     "bolide": "./bin/bolide.mjs"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "dependencies": {
     "tsx": "^4.23.15"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

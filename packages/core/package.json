@@ -5,8 +5,16 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./node": "./src/node.ts"
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "bolide-source": "./src/node.ts",
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    }
   },
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
@@ -16,6 +24,19 @@
     "@hono/node-server": "^2.1.5"
   },
   "peerDependenciesMeta": {
-    "@hono/node-server": { "optional": true }
+    "@hono/node-server": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

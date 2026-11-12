@@ -17,4 +17,4 @@ Mistakes in arguments exit with code 2 and the help text; problems the user can 
 
 ## Why no extra watcher
 
-`node --watch` already tracks the module graph, so the CLI has one dependency (tsx, for TypeScript) and no file-watcher library. It ships TypeScript sources and loads them through tsx until the build step lands.
+`node --watch` already tracks the module graph, so the CLI has one dependency (tsx, for TypeScript) and no file-watcher library. The CLI itself ships compiled JavaScript.

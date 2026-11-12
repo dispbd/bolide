@@ -6,6 +6,7 @@ import { createLogger, isLogLevel, Log, RequestId, RequestLog, type Logger } fro
 import type { Use } from './middleware.ts'
 import type { Module } from './module.ts'
 import { openApiDocument, type OpenApiOptions } from './openapi.ts'
+import { noopTracer, Tracer } from './trace.ts'
 import type { AnyService, InstanceOf } from './service.ts'
 
 export interface AppOptions {
@@ -23,6 +24,8 @@ export interface AppOptions {
   logger?: Logger
   /** Log one line per request (method, path, status, duration, request id). Default true. */
   accessLog?: boolean
+  /** Spans for requests (and jobs, in batteries), injectable as `Tracer`. Default: no tracing. See `otelTracer`. */
+  tracer?: Tracer
   /** Max request body size in bytes; larger bodies get 413. Default 1 MiB. */
   bodyLimit?: number
   /** Serve an OpenAPI 3.1 document built from the routes (at `/openapi.json` by default). */
@@ -48,9 +51,14 @@ export async function createApp(options: AppOptions): Promise<App> {
   const logger = options.logger ?? defaultLogger(env)
   const container = new Container({
     modules: options.modules,
-    builtins: [CurrentRequest, AppEnv, Log, RequestId, RequestLog],
+    builtins: [CurrentRequest, AppEnv, Log, RequestId, RequestLog, Tracer],
     // Later overrides win, so a user override of AppEnv or Log beats `env` and `logger`.
-    overrides: [{ provide: AppEnv, useValue: env }, { provide: Log, useValue: logger }, ...(options.overrides ?? [])],
+    overrides: [
+      { provide: AppEnv, useValue: env },
+      { provide: Log, useValue: logger },
+      { provide: Tracer, useValue: options.tracer ?? noopTracer },
+      ...(options.overrides ?? []),
+    ],
   })
   // Through the container, so an override of Log in `overrides` is honored too.
   const log = () => container.get(Log)
@@ -69,6 +77,8 @@ export async function createApp(options: AppOptions): Promise<App> {
     use,
     prelude: openapi && ((routes) => serveOpenApi(routes, openapi)),
     accessLog: (options.accessLog ?? true) ? log : undefined,
+    // Without a tracer, requests skip the span wrapper entirely.
+    tracer: options.tracer || options.overrides?.some((o) => o.provide === Tracer) ? () => container.get(Tracer) : undefined,
   })
   await container.start()
   return {

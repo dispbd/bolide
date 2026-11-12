@@ -97,6 +97,16 @@ const Users = defineService({ name: 'Users', inject: { log: Log }, factory: ({ l
 - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`) and `LOG_FORMAT` (`json` or `pretty`; default `json` when `NODE_ENV=production`, otherwise `pretty`) come from the app env and are checked at boot.
 - `createApp({ logger: createLogger({ write }) })` collects records in tests; `override(Log, { useValue })` works too. Errors in fields are logged with their stack and `cause`.
 
+## Tracing
+
+`createApp({ tracer })` wraps every request in a server span named after its route (`GET /users/:id`), with the method, path, status and route as attributes, and records unexpected errors on it. Inject `Tracer` to add your own spans; a span started inside another's callback is its child:
+
+```ts
+handler: ({ params }, { tracer, users }) => tracer.span('load user', () => users.find(params.id))
+```
+
+For OpenTelemetry, set up the SDK as usual and pass `otelTracer(api)` with `import * as api from '@opentelemetry/api'`. The core types the API structurally and takes no OpenTelemetry dependency. Incoming `traceparent` headers continue the caller's trace, and the access log gets a `traceId`. Without a tracer nothing is wrapped. `@bolide/queue` adds a consumer span per job run.
+
 ## Bindings
 
 A module can provide a token with another implementation: `providers: [bind(Store, { useValue: memoryStore() })]` or `bind(Store, { useService: RedisStore })`. Everyone still injects `Store`. Unlike `override` (an app-level replacement, usually in tests), a binding's dependencies must be visible from its module, and an app override still beats it. Batteries use bindings to let you choose a driver.

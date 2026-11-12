@@ -12,6 +12,8 @@ import {
   type Logger,
   type Module,
   type Service,
+  type Span,
+  Tracer,
 } from '@bolide/core'
 import { parseCron, type Cron } from './cron.ts'
 import { QueueDriver, type QueueMessage } from './driver.ts'
@@ -128,8 +130,8 @@ export function queueModule(options: QueueModuleOptions): Module {
   const allDeps = defineService({ name: 'queue jobs', inject: jobDeps, factory: (d) => d })
   const impl = defineService({
     name: 'Queue',
-    inject: { driver: QueueDriver, log: Log, deps: allDeps },
-    factory: ({ driver, log, deps }) => new QueueRuntime(driver, log, jobs, deps as Record<string, Record<string, unknown>>, schedules, settings),
+    inject: { driver: QueueDriver, log: Log, tracer: Tracer, deps: allDeps },
+    factory: ({ driver, log, tracer, deps }) => new QueueRuntime(driver, log, tracer, jobs, deps as Record<string, Record<string, unknown>>, schedules, settings),
     onInit: (q) => q.start(),
     onDestroy: (q) => q.stop(),
   })
@@ -163,6 +165,7 @@ class QueueRuntime implements Queue {
   constructor(
     private readonly driver: QueueDriver,
     private readonly log: Logger,
+    private readonly tracer: Tracer,
     private readonly jobs: ReadonlyMap<string, AnyJob>,
     private readonly deps: Record<string, Record<string, unknown>>,
     private readonly schedules: readonly Schedule[],
@@ -305,14 +308,15 @@ class QueueRuntime implements Queue {
 
   private launch(msg: QueueMessage) {
     const abort = new AbortController()
-    const done = this.execute(msg, abort).finally(() => {
+    const attributes = { 'job.name': msg.job, 'job.id': msg.id, 'job.attempt': msg.attempt }
+    const done = this.tracer.span(`job ${msg.job}`, (span) => this.execute(msg, abort, span), { kind: 'consumer', attributes }).finally(() => {
       this.running.delete(msg.id)
       void this.pump()
     })
     this.running.set(msg.id, { done, abort })
   }
 
-  private async execute(msg: QueueMessage, abort: AbortController) {
+  private async execute(msg: QueueMessage, abort: AbortController, span: Span) {
     const job = this.jobs.get(msg.job)!
     const log = this.log.child({ job: msg.job, jobId: msg.id, attempt: msg.attempt })
     const report = (what: string, e: unknown) => log.error(what, { err: e })
@@ -330,6 +334,7 @@ class QueueRuntime implements Queue {
         if (!result.ok) {
           // Retrying can't fix a payload the current schema rejects.
           const e = new ValidationError(`payload of job "${job.name}"`, result.issues)
+          span.recordError(e)
           log.error('job payload is invalid, giving up', { err: e })
           return await this.driver.fail(msg.id, e.message)
         }
@@ -347,6 +352,7 @@ class QueueRuntime implements Queue {
       await this.driver.complete(msg.id)
       log.debug('job done', { ms: Math.round(performance.now() - started) })
     } catch (e) {
+      span.recordError(e)
       const message = e instanceof Error ? e.message : String(e)
       try {
         if (msg.attempt < msg.maxAttempts) {

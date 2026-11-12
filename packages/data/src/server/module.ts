@@ -158,14 +158,22 @@ export function dataModule(options: DataModuleOptions): Module {
     },
   })
 
+  const warned = new Set<string>()
   const shape = defineRoute({
     method: 'GET',
     path: `${prefix}/shape/:name`,
-    inject: { userId: options.userId ?? NoUser },
-    handler: async ({ request, params }, { userId }) => {
+    inject: { userId: options.userId ?? NoUser, log: Log },
+    handler: async ({ request, params }, { userId, log }) => {
       const sh = shapes.get(params.name)
       if (!sh) throw new HttpError(404, `no shape "${params.name}"`, undefined, 'unknown_shape')
-      const where = sh.where({ userId })
+      let where = sh.where({ userId })
+      // `{ ownerId: userId }` with no user: refuse like `false` (a 500 would make the browser retry), and tell the developer once.
+      const missing = where === false ? undefined : Object.keys(where).find((k) => (where as Record<string, unknown>)[k] === undefined)
+      if (missing !== undefined) {
+        if (!warned.has(sh.name)) log.warn(`shape "${sh.name}": its rule gave ${missing}: undefined, so the request was refused. Return false for no rows.`)
+        warned.add(sh.name)
+        where = false
+      }
       if (where === false) throw new HttpError(userId === undefined ? 401 : 403, `shape "${sh.name}" is not readable here`)
       return options.sync!.fetchShape({
         table: sh.table.name,

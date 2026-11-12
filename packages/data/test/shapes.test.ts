@@ -15,6 +15,8 @@ const todos = defineTable('todos', {
 })
 const mine = defineShape('todos.mine', todos, { where: ({ userId }) => (userId ? { ownerId: userId } : false) })
 const people = defineShape('users.public', users, { columns: ['email'] })
+// The careless form: no guard for a missing user.
+const careless = defineShape('todos.careless', todos, { where: ({ userId }) => ({ ownerId: userId }) })
 
 describe('shapes', () => {
   test('defineShape fixes the columns and checks them', () => {
@@ -60,17 +62,21 @@ describe('shapes', () => {
     const seen: { table: string; columns: string[]; where: { sql: string; params: string[] } }[] = []
     const sync = { fetchShape: async (r: (typeof seen)[number]) => (seen.push({ table: r.table, columns: r.columns, where: r.where }), Response.json([])) }
     let current: string | undefined
+    const logs: string[] = []
     const CurrentUser = defineService({ name: 'CurrentUser', scope: 'request', factory: () => current })
     const sql: SqlClient = { unsafe: async () => [], begin: (fn) => fn(sql) }
     const app = await createApp({
       modules: [
         defineModule({ name: 'auth', global: true, providers: [CurrentUser], exports: [CurrentUser] }),
-        dataModule({ sql, tables: [todos, users], mutators: [], shapes: [mine, people], sync: sync as never, userId: CurrentUser }),
+        dataModule({ sql, tables: [todos, users], mutators: [], shapes: [mine, people, careless], sync: sync as never, userId: CurrentUser }),
       ],
-      logger: createLogger({ write: () => {} }),
+      logger: createLogger({ write: (r) => void logs.push(r.msg) }),
     })
     const get = (path: string) => app.fetch(new Request(`http://x/api/data/shape/${path}`))
     assert.equal((await get('todos.mine?offset=-1')).status, 401)
+    assert.equal((await get('todos.careless?offset=-1')).status, 401, 'an undefined value refuses, it never means every row')
+    assert.equal((await get('todos.careless?offset=-1')).status, 401)
+    assert.equal(logs.filter((m) => m.includes('ownerId: undefined')).length, 1, 'the developer is told once')
     current = 'u1'
     assert.equal((await get('todos.mine?offset=-1')).status, 200)
     assert.equal((await get('users.public?offset=-1')).status, 200)

@@ -11,7 +11,7 @@ export interface CreateOptions {
    * through `file:` links. Without it, the published versions are used.
    */
   local?: string
-  /** Write into a directory that already has files. */
+  /** Write into a directory that already has files. Existing files are kept, never overwritten. */
   force?: boolean
 }
 
@@ -35,12 +35,20 @@ export async function create(options: CreateOptions) {
   // Core and CLI are released together, so a project pins the version that generated it.
   const link = (pkg: string) => (local ? `file:${relative(dir, join(local, 'packages', pkg)).split(sep).join('/')}` : `^${cliVersion()}`)
   const files = template({ name, core: link('core'), cli: link('cli') })
+  const written: string[] = []
+  const kept: string[] = []
   for (const [path, content] of Object.entries(files)) {
     const target = join(dir, path)
+    // --force adds the scaffold around existing files; it never overwrites them.
+    if (existsSync(target)) {
+      kept.push(path)
+      continue
+    }
     await mkdir(dirname(target), { recursive: true })
     await writeFile(target, content)
+    written.push(path)
   }
-  return { dir, name, files: Object.keys(files) }
+  return { dir, name, files: written, kept }
 }
 
 /** npm package names are lowercase and URL-safe. */

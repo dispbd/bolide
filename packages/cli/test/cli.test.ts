@@ -39,7 +39,7 @@ describe('bolide create', () => {
     execFileSync(process.execPath, [tsxCli, '--test', join(dir, 'test/users.test.ts')], { stdio: 'pipe', cwd: dir })
   })
 
-  test('refuses a non-empty directory unless --force', async () => {
+  test('refuses a non-empty directory unless --force, which never overwrites', async () => {
     const dir = join(tmp, 'busy')
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, 'keep.txt'), 'x')
@@ -48,6 +48,11 @@ describe('bolide create', () => {
     assert.match(err.text(), /is not empty.*--force/)
     assert.equal(await run(['create', dir, '--force'], () => {}), 0)
     assert.equal(await readFile(join(dir, 'keep.txt'), 'utf8'), 'x')
+    await writeFile(join(dir, 'package.json'), '{"name":"mine"}')
+    const out = capture()
+    assert.equal(await run(['create', dir, '--force'], out.log), 0)
+    assert.equal(await readFile(join(dir, 'package.json'), 'utf8'), '{"name":"mine"}')
+    assert.match(out.text(), /Kept existing files: .*package\.json/)
   })
 
   test('pins published versions to the CLI version by default', async () => {

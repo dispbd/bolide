@@ -31,13 +31,14 @@ export function dev(options: DevOptions = {}) {
   const forward = (signal: NodeJS.Signals) => child.kill(signal)
   process.on('SIGINT', forward)
   process.on('SIGTERM', forward)
+  const cleanup = () => {
+    process.off('SIGINT', forward)
+    process.off('SIGTERM', forward)
+  }
   const exited = new Promise<number>((done, fail) => {
-    child.once('error', fail)
-    child.once('exit', (code, signal) => {
-      process.off('SIGINT', forward)
-      process.off('SIGTERM', forward)
-      done(code ?? (signal ? 128 + signalNumber(signal) : 1))
-    })
+    // A failed spawn emits 'error' and no 'exit', so both paths clean up.
+    child.once('error', (e) => (cleanup(), fail(e)))
+    child.once('exit', (code, signal) => (cleanup(), done(code ?? (signal ? 128 + signalNumber(signal) : 1))))
   })
   return { child, exited, stop: () => (child.kill('SIGTERM'), exited) }
 }

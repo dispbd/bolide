@@ -129,7 +129,7 @@ describe('openapi', () => {
     const doc = openApiDocument((await createApp({ modules: [m] })).routes, { info }) as any
     const op = doc.paths['/opt'].post
     assert.equal(op.requestBody.required, false)
-    assert.equal(op.responses['400'].content['application/json'].schema.oneOf.length, 2)
+    assert.equal(op.responses['400'].content['application/json'].schema.anyOf.length, 2)
   })
 
   test('openapi.path must start with a slash; the document wins over param routes', async () => {

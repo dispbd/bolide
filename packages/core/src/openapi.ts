@@ -120,7 +120,7 @@ export function openApiDocument(routes: readonly RouteInfo[], options: OpenApiOp
     }
     if (route.params || route.query || route.body) {
       // A body route can also answer 400 for malformed JSON, with the plain error shape.
-      const invalid = route.body ? { oneOf: [validationBody, errorBody] } : validationBody
+      const invalid = route.body ? { anyOf: [validationBody, errorBody] } : validationBody
       responses['400'] = { description: 'Invalid input', ...json(invalid) }
     }
     if (route.body) {

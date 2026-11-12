@@ -86,15 +86,15 @@ async function input(where: string, schema: StandardSchemaV1 | undefined, value:
 }
 
 async function readJson(request: Request, limit: number) {
+  // Decide by what was read: Node adapters attach a stream to every POST, even an empty one.
+  const text = await readText(request, limit)
+  // An empty body has nothing to forge; let the schema decide whether it's allowed.
+  if (!text) return undefined
   // Requiring a JSON content type makes cross-site form posts need a CORS preflight (CSRF).
   const type = request.headers.get('content-type')?.split(';')[0]!.trim().toLowerCase() ?? ''
-  // No body at all: let the schema decide whether that's allowed.
-  if (!type && !request.body) return undefined
   if (type !== 'application/json' && !type.endsWith('+json')) {
     throw new HttpError(415, 'request body must be JSON (Content-Type: application/json)')
   }
-  const text = await readText(request, limit)
-  if (!text) return undefined
   try {
     return JSON.parse(text)
   } catch {

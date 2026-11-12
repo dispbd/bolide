@@ -245,6 +245,21 @@ describe('node', () => {
     }
   })
 
+  test('an empty POST without Content-Type reaches an optional body schema over real HTTP', async () => {
+    const m = defineModule({ name: 'm', routes: [defineRoute({ method: 'POST', path: '/opt', body: z.object({ a: z.number() }).optional(), handler: ({ body }) => ({ got: body ?? null }) })] })
+    const app = await createApp({ modules: [m] })
+    const server = await listen(app, { port: 0, handleSignals: false })
+    try {
+      const res = await fetch(`http://localhost:${server.port}/opt`, { method: 'POST' })
+      assert.equal(res.status, 200)
+      assert.deepEqual(await res.json(), { got: null })
+      const form = await fetch(`http://localhost:${server.port}/opt`, { method: 'POST', body: '{"a":1}', headers: { 'content-type': 'text/plain' } })
+      assert.equal(form.status, 415)
+    } finally {
+      await server.close()
+    }
+  })
+
   test('listen() rejects when the port is taken', async () => {
     const app = await createApp({ modules: [users] })
     const first = await listen(app, { port: 0, handleSignals: false })

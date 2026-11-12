@@ -1,0 +1,32 @@
+{
+  "name": "@bolide/vue",
+  "version": "0.0.0",
+  "description": "Vue composables for the Bolide client: live shapes and optimistic mutations",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@bolide/client": "0.0.0",
+    "@bolide/data": "0.0.0"
+  },
+  "peerDependencies": {
+    "vue": "^3.3.0"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

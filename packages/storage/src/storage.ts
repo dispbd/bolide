@@ -14,8 +14,8 @@ export interface ServeOptions {
   /** Send as a download with this file name. */
   download?: string
   /**
-   * Allow types a browser would run as a page (HTML, SVG, XML) to display inline.
-   * Off by default: user uploads served from your origin could otherwise run scripts there.
+   * Display any type inline. By default only passive types (raster images, audio, video, PDF, plain text, CSV, JSON) display inline;
+   * the rest (HTML, SVG, XML and anything unknown) is sent as a download, so an upload can't run scripts on your origin.
    */
   inline?: boolean
   /** Default `private, max-age=0`. */
@@ -46,7 +46,8 @@ export function guessType(key: string) {
   return types[key.slice(key.lastIndexOf('.') + 1).toLowerCase()] ?? 'application/octet-stream'
 }
 
-const active = /^(text\/html|image\/svg\+xml|application\/xhtml\+xml|text\/xml|application\/xml)\b/i
+// An allowlist: a type a browser might render as a page (HTML, SVG, XML, something new) is never shown inline.
+const passive = /^(image\/(png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)|audio\/[\w.+-]+|video\/[\w.+-]+|application\/(pdf|json)|text\/(plain|csv))\s*(;|$)/i
 
 async function toBytes(body: Body, maxSize: number): Promise<Uint8Array> {
   const tooBig = () => new HttpError(413, `file exceeds ${maxSize} bytes`)
@@ -122,7 +123,7 @@ export function createStorage(driver: StorageDriver): Storage {
         'x-content-type-options': 'nosniff',
         'cache-control': options.cacheControl ?? 'private, max-age=0',
       })
-      const name = options.download ?? (!options.inline && active.test(f.contentType) ? key.slice(key.lastIndexOf('/') + 1) : undefined)
+      const name = options.download ?? (!options.inline && !passive.test(f.contentType) ? key.slice(key.lastIndexOf('/') + 1) : undefined)
       if (name !== undefined) headers.set('content-disposition', `attachment; filename="${name.replace(/["\\\r\n]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`)
       return new Response(f.body, { headers })
     },

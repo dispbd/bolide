@@ -30,7 +30,7 @@ createApp({ modules: [storageModule({ driver: s3Storage({ bucket, region, access
 
 - `put(key, body, { contentType, maxSize })`: body is a string, bytes, a `Blob`/`File` or a stream. The type comes from the option, the Blob, or the key's extension.
 - `get(key)` (a stream with size, type and date), `bytes`, `text`, `head`, `exists`, `delete`.
-- `response(key, { download, inline, cacheControl })`: a `Response` for a route, or a 404. It sets `nosniff`, and HTML, SVG and XML are sent as downloads unless `inline: true`, so a user's upload can't run scripts on your origin.
+- `response(key, { download, inline, cacheControl })`: a `Response` for a route, or a 404. It sets `nosniff`, and only passive types (raster images, audio, video, PDF, plain text, CSV, JSON) display inline; HTML, SVG, XML and anything unknown are sent as downloads unless `inline: true`, so a user's upload can't run scripts on your origin.
 - `url(key, { expiresIn })`: a presigned URL (S3), default 15 minutes, at most 7 days.
 
 Keys are relative paths (`avatars/42.png`). Leading slashes, `.` and `..` segments, hidden segments, backslashes and control characters are refused, so a key can never leave its folder. Don't build keys from upload file names; use ids.

@@ -66,6 +66,10 @@ describe('serving files', () => {
     assert.equal((await storage.response('u/page.html', { inline: true })).headers.get('content-disposition'), null)
     assert.match((await storage.response('u/pic.png', { download: 'my "pic".png' })).headers.get('content-disposition')!, /filename="my _pic_.png"; filename\*=UTF-8''my%20%22pic%22.png/)
     await assert.rejects(storage.response('u/none.png'), (e) => e instanceof HttpError && e.status === 404)
+    for (const [key, type] of [['u/a.svg', 'image/svg+xml'], ['u/a.xml', 'text/xml'], ['u/a.bin', 'application/x-thing'], ['u/b.png', 'image/png+html']]) {
+      await storage.put(key, 'x', { contentType: type })
+      assert.match((await storage.response(key)).headers.get('content-disposition') ?? '', /^attachment/, type)
+    }
     await assert.rejects(storage.url('u/pic.png'), /no direct URLs/)
   })
 

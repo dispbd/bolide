@@ -105,11 +105,13 @@ export function postgresSync(sql: ListeningSqlClient, options: PostgresSyncOptio
     )) as unknown as ChangeRow[]
   }
 
-  function wait(table: string, signal: AbortSignal) {
-    return new Promise<void>((resolve) => {
+  /** Starts listening for a change to `table` now; `promise` settles on one, on timeout or on abort. */
+  function waiter(table: string, signal: AbortSignal) {
+    let done!: () => void
+    const promise = new Promise<void>((resolve) => {
       const set = waiters.get(table) ?? new Set()
       waiters.set(table, set)
-      const done = () => {
+      done = () => {
         clearTimeout(timer)
         set.delete(done)
         signal.removeEventListener('abort', done)
@@ -119,6 +121,7 @@ export function postgresSync(sql: ListeningSqlClient, options: PostgresSyncOptio
       set.add(done)
       signal.addEventListener('abort', done)
     })
+    return { promise, cancel: () => done() }
   }
 
   return {
@@ -154,11 +157,14 @@ export function postgresSync(sql: ListeningSqlClient, options: PostgresSyncOptio
       // Changes after this client's offset were pruned: it must load the shape again.
       if (offset < Number(seq) - 1 && (first === null ? offset < Number(seq) : offset < Number(first) - 1)) return json([{ headers: { control: 'must-refetch' } }], {}, 409)
 
+      // Listen before reading, so a change committed between the read and the wait still wakes this request.
+      const woken = live ? waiter(table, signal) : undefined
       let changes = await changesAfter(table, where, offset)
-      if (!changes.length && live) {
-        await wait(table, signal)
+      if (!changes.length && woken) {
+        await woken.promise
         if (!signal.aborted) changes = await changesAfter(table, where, offset)
       }
+      woken?.cancel()
       const messages: unknown[] = []
       for (const c of changes) {
         if (c.new_in) messages.push(message(table, c.old_in ? 'update' : 'insert', project(c.new!, columns), c.txid))

@@ -33,6 +33,9 @@ describe('shapes', () => {
     assert.throws(() => whereSql(todos, { nope: 1 } as never), /no column "nope"/)
     assert.throws(() => whereSql(todos, { priority: { gt: 1, lt: 5 } as never }), /one of in, ne/)
     assert.throws(() => whereSql(todos, { priority: { like: 1 } as never }), /unknown operator "like"/)
+    // Fail closed: a rule like { ownerId: userId } without a user must not stream the whole table.
+    assert.throws(() => whereSql(todos, { ownerId: undefined }), /todos.ownerId is undefined. Return false/)
+    assert.throws(() => whereSql(todos, { constructor: 'x' } as never), /no column "constructor"/)
   })
 
   test('electric() asks for the shape the server decided, with the browser\'s protocol params only', async () => {

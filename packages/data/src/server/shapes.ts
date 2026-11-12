@@ -29,8 +29,9 @@ export function whereSql(table: AnyTable, where: Where<AnyTable>): WhereSql {
     return `$${params.length}`
   }
   for (const [key, cond] of Object.entries(where)) {
-    if (cond === undefined) continue
-    const def = table.columns[key] as Def | undefined
+    // Fail closed: `{ ownerId: userId }` with no user must not mean "every row".
+    if (cond === undefined) throw new TypeError(`where on ${table.name}.${key} is undefined. Return false from the rule to give no rows, or leave the key out on purpose.`)
+    const def = Object.hasOwn(table.columns, key) ? (table.columns[key] as Def) : undefined
     if (!def) throw new TypeError(`where on ${table.name}: no column "${key}".`)
     // Sync engines filter on scalar columns; JSON filters belong in a column of their own.
     if (def.kind === 'json') throw new TypeError(`where on ${table.name}.${key}: json columns can't be filtered on.`)

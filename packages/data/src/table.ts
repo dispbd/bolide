@@ -102,7 +102,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function checkColumns(table: AnyTable, value: Record<string, unknown>, required: (def: ColumnDef) => boolean): Issue[] {
   const issues: Issue[] = []
-  for (const k of Object.keys(value)) if (!(k in table.columns)) issues.push({ message: `unknown column "${k}" in ${table.name}`, path: [k] })
+  for (const k of Object.keys(value)) if (!Object.hasOwn(table.columns, k)) issues.push({ message: `unknown column "${k}" in ${table.name}`, path: [k] })
   for (const [k, def] of Object.entries(table.columns) as [string, ColumnDef][]) {
     const v = value[k]
     if (v === undefined) {

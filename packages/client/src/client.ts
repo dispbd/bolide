@@ -263,6 +263,8 @@ export function createClient(options: ClientOptions) {
       seenTxids.add(t)
       txidWaiters.get(t)?.()
     }
+    // Only txids that arrive before their mutation's answer matter; keep the newest few.
+    if (seenTxids.size > 1000) for (const t of seenTxids) if (seenTxids.delete(t) && seenTxids.size <= 500) break
     void rebuild()
   }
 
@@ -295,11 +297,14 @@ export function createClient(options: ClientOptions) {
             {
               changes: (changes, txids) => applySync(state, changes, txids),
               upToDate: () => {
-                if (state.status !== 'ready') {
+                if (state.status === 'ready') return
+                // After the rebuild that applySync queued, so `await ready` sees the first rows.
+                void rebuild().then(() => {
+                  if (state.status === 'ready' || !state.stop) return
                   state.status = 'ready'
                   state.markReady()
                   notify()
-                }
+                })
               },
               reset: () => {
                 state.rows.clear()
@@ -382,12 +387,21 @@ export function createClient(options: ClientOptions) {
   }
 
   let flushing = false
+  let closed = false
+  const naps = new Set<() => void>()
+  /** A backoff wait that close() cuts short. */
+  const nap = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const wake = () => (clearTimeout(timer), naps.delete(wake), resolve())
+      const timer = setTimeout(wake, ms)
+      naps.add(wake)
+    })
   async function flush() {
     if (flushing) return
     flushing = true
     try {
       let delay = retryInitial
-      for (let p = pending.find((x) => x.status === 'pending'); p; p = pending.find((x) => x.status === 'pending')) {
+      for (let p = pending.find((x) => x.status === 'pending'); p && !closed; p = pending.find((x) => x.status === 'pending')) {
         let res: Response
         try {
           res = await doFetch(`${base}/mutate`, {
@@ -397,13 +411,13 @@ export function createClient(options: ClientOptions) {
             body: JSON.stringify({ id: p.id, name: p.mutator.name, input: p.input }),
           })
         } catch {
-          await sleep(delay) // offline or the server is restarting: same mutation again, in order
+          await nap(delay) // offline or the server is restarting: same mutation again, in order
           delay = Math.min(delay * 2, retryMax)
           continue
         }
         if (res.status >= 500 || res.status === 429 || res.status === 408) {
           await res.body?.cancel().catch(() => {})
-          await sleep(delay)
+          await nap(delay)
           delay = Math.min(delay * 2, retryMax)
           continue
         }
@@ -415,27 +429,30 @@ export function createClient(options: ClientOptions) {
           continue
         }
         p.status = 'sent'
-        void confirm(p, String(body.txid))
+        // Without a txid (a proxy or a custom route answered) there is nothing to wait for on the stream.
+        void confirm(p, typeof body.txid === 'string' || typeof body.txid === 'number' ? String(body.txid) : undefined)
       }
     } finally {
       flushing = false
     }
   }
 
-  async function confirm(p: PendingMutation, txid: string) {
+  async function confirm(p: PendingMutation, txid: string | undefined) {
     const synced = new Set([...shapes.values()].filter((s) => s.stop).map((s) => s.shape.table))
     const waits = p.ops.some((op) => synced.has(op.table))
-    if (waits && !seenTxids.has(txid)) {
+    if (txid !== undefined && waits && !seenTxids.has(txid)) {
+      const id = txid
       await new Promise<void>((resolve) => {
         const timer = setTimeout(done, confirmTimeout)
         function done() {
           clearTimeout(timer)
-          txidWaiters.delete(txid)
+          txidWaiters.delete(id)
           resolve()
         }
-        txidWaiters.set(txid, done)
+        txidWaiters.set(id, done)
       })
     }
+    if (txid !== undefined) seenTxids.delete(txid)
     p.status = 'confirmed'
     await finish(p)
     p.settle.resolve()
@@ -446,8 +463,11 @@ export function createClient(options: ClientOptions) {
     shape,
     /** Mutations not yet confirmed, oldest first. */
     pending: () => pending.map((p) => p.handle) as readonly Mutation[],
-    /** Stops every shape stream. */
+    /** Stops every shape stream and stops sending: unsent mutations stay unsent. */
     close() {
+      closed = true
+      for (const wake of [...naps]) wake()
+      for (const done of [...txidWaiters.values()]) done()
       for (const s of shapes.values()) {
         s.stop?.()
         s.stop = undefined
@@ -475,4 +495,3 @@ function sameRows(a: readonly Record<string, unknown>[], b: readonly Record<stri
   return true
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

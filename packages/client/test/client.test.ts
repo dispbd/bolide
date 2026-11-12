@@ -186,6 +186,33 @@ describe('client', () => {
     assert.equal(stopped(), 1)
   })
 
+  test('ready resolves with the first rows already there', async () => {
+    const { view, sinks } = setup()
+    const id = crypto.randomUUID()
+    sinks.get('todos.mine')!.changes([{ type: 'insert', row: row(id, 'first') }], [])
+    sinks.get('todos.mine')!.upToDate()
+    await view.ready
+    assert.equal(view.status, 'ready')
+    assert.deepEqual(view.rows().map((r) => r.title), ['first'])
+  })
+
+  test('an answer without a txid confirms at once; close() stops retrying', async () => {
+    const quiet = setup(() => Response.json({}))
+    const m = quiet.client.mutate(create, { id: crypto.randomUUID(), title: 'x' })
+    const t0 = Date.now()
+    await m.done
+    assert.ok(Date.now() - t0 < 40, 'did not wait for confirmTimeout')
+
+    let tries = 0
+    const offline = setup(() => (tries++, 'offline'))
+    offline.client.mutate(archive, {})
+    await new Promise((r) => setTimeout(r, 10))
+    offline.client.close()
+    const after = tries
+    await new Promise((r) => setTimeout(r, 30))
+    assert.equal(tries, after, 'no more attempts after close')
+  })
+
   test('a stream outlives an unsubscribe that is followed at once by a subscribe', async () => {
     const { client, sinks, stopped } = setup()
     const other = defineShape('todos.all', todos)

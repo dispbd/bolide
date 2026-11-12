@@ -6,9 +6,9 @@
     "db:up": "bash scripts/db-up.sh",
     "db:down": "bash scripts/db-down.sh",
     "server": "tsx spike/server/main.ts",
-    "test": "LOG_LEVEL=warn tsx --conditions=bolide-source --test spike/core/*.test.ts packages/*/test/*.test.ts",
-    "test:int": "tsx --conditions=bolide-source --test --test-force-exit spike/**/*.int.test.ts packages/*/test/int/*.test.ts",
-    "test:int:packages": "tsx --conditions=bolide-source --test --test-force-exit packages/*/test/int/*.test.ts",
+    "test": "LOG_LEVEL=warn tsx --conditions=bolide-source --test spike/core/*.test.ts packages/*/test/*.test.ts examples/*/test/*.test.ts",
+    "test:int": "tsx --conditions=bolide-source --test --test-force-exit spike/**/*.int.test.ts packages/*/test/int/*.test.ts examples/*/test/*.test.ts",
+    "test:int:packages": "tsx --conditions=bolide-source --test --test-force-exit packages/*/test/int/*.test.ts examples/*/test/*.test.ts",
     "bench": "tsx spike/bench/latency.ts",
     "bundle-size": "node spike/bench/bundle-size.mjs",
     "typecheck": "tsc --noEmit",
@@ -37,7 +37,8 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsx": "^4.23.15",
-    "typescript": "5.9"
+    "typescript": "5.9",
+    "valibot": "^1.5.0"
   },
   "workspaces": [
     "packages/*"

@@ -16,14 +16,17 @@
     ],
     "customConditions": [
       "bolide-source"
-    ]
+    ],
+    "jsx": "react-jsx"
   },
   "include": [
     "spike",
-    "packages"
+    "packages",
+    "examples"
   ],
   "exclude": [
     "packages/*/dist",
-    "packages/cli/test/.tmp"
+    "packages/cli/test/.tmp",
+    "examples/*/node_modules"
   ]
 }

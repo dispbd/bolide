@@ -136,4 +136,26 @@ if [ -z "$ok" ]; then
   cat dev.log >&2
   exit 1
 fi
-echo "pack-check: OK (installed from tarballs: typecheck, tests and bolide dev pass)"
+
+# The todos template, from the installed CLI: typecheck, its tests (the Postgres ones skip without
+# DATABASE_URL) and a production browser bundle from the packages' dist.
+cd "$work"
+app/node_modules/.bin/bolide create todos --template todos >/dev/null
+cd todos
+node -e "
+const fs = require('fs')
+const p = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+const tgz = (name) => 'file:../' + fs.readdirSync('..').find((f) => f.startsWith('bolide-' + name + '-'))
+for (const deps of [p.dependencies, p.devDependencies]) for (const d of Object.keys(deps)) if (d.startsWith('@bolide/')) deps[d] = tgz(d.slice(8))
+fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
+"
+npm install --silent
+npm run typecheck --silent
+npm test --silent
+./node_modules/.bin/esbuild src/client/main.tsx --bundle --minify --format=esm --define:process.env.NODE_ENV='"production"' --outfile=dist/app.js --log-level=warning
+node -e "
+const kb = require('zlib').gzipSync(require('fs').readFileSync('dist/app.js')).length / 1024
+console.log('pack-check: todos bundle ' + kb.toFixed(1) + ' KB gzipped (React included)')
+if (kb > 120) process.exit(1)
+"
+echo "pack-check: OK (installed from tarballs: typecheck, tests and bolide dev pass; todos template builds)"

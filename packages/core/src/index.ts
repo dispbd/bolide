@@ -2,7 +2,7 @@ export { BolideError, ConfigError, DependencyError, HttpError, ValidationError, 
 export { parse, type Infer, type ParseResult, type StandardSchemaV1 } from './schema.ts'
 export { defineService, defineValue, type AnyService, type Deps, type InstanceOf, type Resolved, type Scope, type Service, type ServiceOptions } from './service.ts'
 export { defineModule, type Module, type ModuleOptions } from './module.ts'
-export { Container, RequestScope, override, type ContainerOptions, type Override } from './container.ts'
+export { bind, Container, RequestScope, override, type ContainerOptions, type Override } from './container.ts'
 export {
   defineRoute,
   json,
@@ -33,3 +33,4 @@ export {
   type LogLevel,
   type LogRecord,
 } from './log.ts'
+export { toMs, type Duration } from './duration.ts'

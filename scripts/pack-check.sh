@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Packs @bolide/core and @bolide/cli, installs them into a project made by
+# Packs @bolide/core, @bolide/cli and the batteries, installs them into a project made by
 # `bolide create` (as a user would, from tarballs), then typechecks and tests it.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -16,18 +16,33 @@ const p = JSON.parse(fs.readFileSync('package.json', 'utf8'))
 const tgz = (name) => 'file:../' + fs.readdirSync('..').find((f) => f.startsWith('bolide-' + name + '-'))
 p.dependencies['@bolide/core'] = tgz('core')
 p.devDependencies['@bolide/cli'] = tgz('cli')
+p.dependencies['@bolide/cache'] = tgz('cache')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
 # Types from dist/*.d.ts must be real, not silently any.
 cat > src/types-check.ts <<'TS'
 import { defineService } from '@bolide/core'
+import { Cache, cacheModule } from '@bolide/cache'
 const s = defineService({ name: 'x', factory: () => 1 })
 // @ts-expect-error name is a string
 export const n: number = s.name
+export const m = cacheModule({ ttl: '5m' })
+defineService({ name: 'y', inject: { cache: Cache }, factory: async ({ cache }) => {
+  // @ts-expect-error ttl must be a Duration
+  await cache.set('k', 1, { ttl: '5 minutes' })
+  return cache.wrap('k', () => 1)
+} })
 TS
 npm run typecheck --silent
 rm src/types-check.ts
+# Batteries must load from dist next to the installed core (one core instance, shared tokens).
+node --input-type=module -e "
+const { createApp, createLogger } = await import('@bolide/core')
+const { Cache, cacheModule } = await import('@bolide/cache')
+const app = await createApp({ modules: [cacheModule()], logger: createLogger({ level: 'error' }) })
+if ((await app.get(Cache).wrap('k', () => 42)) !== 42) process.exit(1)
+"
 npm test --silent
 
 # The installed binary (from the tarball, not the repo) must serve the app.

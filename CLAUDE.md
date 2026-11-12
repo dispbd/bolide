@@ -23,11 +23,13 @@ An experimental Node.js/TypeScript framework: the structure of Nest.js, the buil
 npm ci
 npm run typecheck   # tsc, including packages/core/test/types.check.ts
 npm test            # builds, then unit tests (node:test via tsx, sources via the bolide-source condition)
-npm run build       # tsc -> packages/*/dist (what npm consumers get)
+npm run build       # tsc -> packages/*/dist (what npm consumers get); core builds first
 npm run pack:check  # packs the packages, installs them into a fresh `bolide create` project, typechecks and tests it
 npm run db:up && npm run test:int   # spike integration tests: Postgres + Electric in Docker
 ```
 
 Packages export `dist/` to consumers and `src/` under the `bolide-source` condition, which the repo's tsconfig and test scripts enable. Relative imports use `.ts` extensions; the build rewrites them.
+
+Batteries (`packages/cache`, ...) are separate packages with `@bolide/core` as a peer dependency, so an app has one core and shared tokens. Add a new package to the root `build` script and to `scripts/pack-check.sh`.
 
 Compile-time behavior is tested in `packages/core/test/types.check.ts` with `@ts-expect-error`; add a case there when you change public types.

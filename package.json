@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "pretest:core": "npm run build",
     "test:core": "LOG_LEVEL=warn tsx --conditions=bolide-source --test packages/*/test/*.test.ts",
-    "build": "npm run build --workspaces",
+    "build": "npm run build -w @bolide/core && npm run build -w @bolide/cli -w @bolide/cache",
     "pretest": "npm run build",
     "pack:check": "bash scripts/pack-check.sh"
   },

@@ -190,3 +190,9 @@ defineRoute({
     return null
   },
 })
+
+// bind(): the implementation must match the token's instance type.
+import { bind } from '../src/container.ts'
+bind(Db, { useValue: { query: (sql: string) => [sql] } })
+// @ts-expect-error wrong instance type
+bind(Db, { useValue: { query: 1 } })

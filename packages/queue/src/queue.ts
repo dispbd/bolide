@@ -214,7 +214,7 @@ class QueueRuntime implements Queue {
           const payload = await parse(s.job.schema, s.payload)
           if (!payload.ok) throw new ValidationError(`payload of schedule "${s.name}"`, payload.issues)
         }
-        this.plan(s, s.cron.next(new Date()))
+        this.plan(s, s.cron.next(new Date(Date.now())))
       }
     }
   }

@@ -233,19 +233,35 @@ describe('schedules', () => {
   })
 
   test('each slot is enqueued once, even with two schedulers on one driver', async (t) => {
-    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: new Date('2026-01-01T00:00:30Z') })
+    // A hand-made clock: node:test's mock timers differ between Node 20.6 and 22.
+    let now = Date.parse('2026-01-01T00:00:30Z')
+    let timers: { at: number; fn: () => void }[] = []
+    t.mock.method(Date, 'now', () => now)
+    t.mock.method(globalThis, 'setTimeout', (fn: () => void, ms = 0) => {
+      const timer = { at: now + ms, fn }
+      timers.push(timer)
+      return timer
+    })
+    t.mock.method(globalThis, 'clearTimeout', (timer: unknown) => void (timers = timers.filter((x) => x !== timer)))
+    const advance = async (ms: number) => {
+      now += ms
+      for (const due of timers.filter((x) => x.at <= now)) {
+        timers = timers.filter((x) => x !== due)
+        due.fn()
+      }
+      await new Promise((r) => setImmediate(r))
+    }
     const Ping = defineJob({ name: 'ping', handler: () => {} })
     const driver = memoryQueue()
     const module = () => queueModule({ jobs: [Ping], driver, worker: false, scheduler: true, schedules: [defineSchedule({ cron: '* * * * *', job: Ping })] })
     const a = await createApp({ modules: [module()], logger: quiet })
     const b = await createApp({ modules: [module()], logger: quiet })
-    t.mock.timers.tick(30_000)
-    await new Promise((r) => setImmediate(r))
-    t.mock.timers.tick(60_000)
-    await new Promise((r) => setImmediate(r))
+    await advance(30_000)
+    await advance(60_000)
     const msgs = driver.messages('ping')
     assert.deepEqual(msgs.map((m) => m.runAt.toISOString()), ['2026-01-01T00:01:00.000Z', '2026-01-01T00:02:00.000Z'])
     await a.close()
     await b.close()
+    assert.equal(timers.length, 0, 'close() clears the schedule timers')
   })
 })

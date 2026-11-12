@@ -70,7 +70,7 @@ defineModule({ name: 'admin', use: [signedIn] }) // this module's routes
 defineRoute({ ..., use: [rateLimit] })           // one route
 ```
 
-They run app → module → route, outermost first, all before input is parsed. Errors from the handler, a guard or inner middleware are already responses by the time `next()` returns, so a logger anywhere in the chain can read `res.status`. Deps come from the request scope and are checked at boot: module and route middleware see what their module sees; app middleware sees built-ins, global modules and the exports of the modules passed to `createApp`.
+They run app → module → route, outermost first, all before input is parsed. Errors from the handler, a guard or inner middleware are already responses by the time `next()` returns, so a logger anywhere in the chain can read `res.status`. Responses from handlers are copied, so middleware can set headers even on `Response.redirect()` or a proxied `fetch()` result; a response that middleware builds itself is passed on as is. Deps come from the request scope and are checked at boot: module and route middleware see what their module sees; app middleware sees built-ins, global modules and the exports of the modules passed to `createApp`.
 
 ## OpenAPI
 

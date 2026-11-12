@@ -191,7 +191,8 @@ async function readText(request: Request, limit: number) {
 }
 
 function toResponse(result: unknown, status: number): Response {
-  if (result instanceof Response) return result
+  // Response.redirect() and fetch() results have immutable headers; a copy lets middleware set them.
+  if (result instanceof Response) return new Response(result.body, result)
   if (result === undefined) return new Response(null, { status: 204 })
   return Response.json(result, { status })
 }

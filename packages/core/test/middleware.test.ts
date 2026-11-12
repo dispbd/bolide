@@ -53,6 +53,20 @@ describe('middleware', () => {
     assert.equal((await get(app, '/openapi.json')).headers.get('access-control-allow-origin'), '*')
   })
 
+  test('middleware can set headers on a redirect or a proxied response', async () => {
+    const tag = defineMiddleware({ name: 'tag', handle: async (_c, next) => {
+      const res = await next()
+      res.headers.set('x-tag', '1')
+      return res
+    } })
+    const route = defineRoute({ method: 'GET', path: '/go', handler: () => Response.redirect('http://example.com/', 302) })
+    const app = await createApp({ modules: [defineModule({ name: 'm', routes: [route] })], use: [tag] })
+    const res = await get(app, '/go')
+    assert.equal(res.status, 302)
+    assert.equal(res.headers.get('location'), 'http://example.com/')
+    assert.equal(res.headers.get('x-tag'), '1')
+  })
+
   test('middleware can answer without calling next()', async () => {
     const maintenance = defineMiddleware({ name: 'maintenance', handle: () => new Response('down', { status: 503 }) })
     const m = defineModule({ name: 'm', routes: [defineRoute({ method: 'GET', path: '/x', handler: () => assert.fail('handler ran') })] })

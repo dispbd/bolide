@@ -17,6 +17,16 @@ type Part =
 
 export type Compiled = Part[]
 
+/** The argument names a compiled message reads, including those inside plural and select cases. */
+export function argNames(parts: Compiled, out = new Set<string>()): Set<string> {
+  for (const p of parts) {
+    if (typeof p === 'string' || p.kind === 'hash') continue
+    out.add(p.name)
+    if (p.kind !== 'arg') for (const c of Object.values(p.cases)) argNames(c, out)
+  }
+  return out
+}
+
 export function compile(message: string, where = 'message'): Compiled {
   let i = 0
   const fail = (why: string): never => {

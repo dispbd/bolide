@@ -63,6 +63,9 @@ describe('messages', () => {
     assert.throws(() => compile('{n, plural, other {x}'), /unclosed/)
     assert.throws(() => defineI18n({ defaultLocale: 'en', messages: { a: 'A' }, translations: { de: { b: 'B' } as never } }), /translation de has "b"/)
     assert.throws(() => defineI18n({ defaultLocale: 'not a tag!', messages: {} }), /not a valid language tag/)
+    assert.throws(() => defineI18n({ defaultLocale: 'en', messages: { a: 'Hi {name}' }, translations: { de: { a: 'Hallo {nam}' } } }), /translation de "a" uses \{nam\}/)
+    assert.throws(() => defineI18n({ defaultLocale: 'en', messages: { a: '{n, plural, other {#}}' }, translations: { de: { a: '{n, plural, other {# {x}}}' } } }), /uses \{x\}/)
+    defineI18n({ defaultLocale: 'en', messages: { a: 'Hi {name}' }, translations: { de: { a: 'Hallo' } } })
   })
 })
 
@@ -88,6 +91,7 @@ describe('locale detection', () => {
     assert.equal(await get('/hi', { 'accept-language': 'ru', cookie: 'a=1; lang=en' }), 'Hello, Bo!')
     assert.equal(await get('/hi?lang=ru', { cookie: 'lang=en' }), 'Привет, Bo!')
     assert.equal(await get('/hi?lang=zz', { 'accept-language': 'ru' }), 'Привет, Bo!', 'unsupported values fall through')
+    assert.equal(await get('/hi', { cookie: 'lang=%E0', 'accept-language': 'ru' }), 'Привет, Bo!', 'a malformed cookie is ignored')
     const warn = records.find((r) => r.msg.startsWith('i18n: ru is missing'))!
     assert.deepEqual(warn.fields.keys, ['plain', 'cart.total', 'who', 'quoted'])
   })

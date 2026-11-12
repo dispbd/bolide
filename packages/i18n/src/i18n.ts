@@ -1,5 +1,5 @@
 import { BolideError, CurrentRequest, defineModule, defineService, Log, type Service } from '@bolide/core'
-import { compile, render, type Compiled, type FormatContext, type Value } from './format.ts'
+import { argNames, compile, render, type Compiled, type FormatContext, type Value } from './format.ts'
 
 /** Messages, nested by topic: `{ nav: { home: 'Home' }, cart: { items: '{count, plural, one {# item} other {# items}}' } }`. */
 export type Catalog = { readonly [key: string]: string | Catalog }
@@ -112,7 +112,17 @@ export function defineI18n<const C extends Catalog>(options: I18nOptions<C>) {
   const base = flatten(options.messages)
   const compileAll = (locale: string, flat: Map<string, string>) => {
     const m = new Map<string, Compiled>()
-    for (const [k, v] of flat) m.set(k, compile(v, `i18n ${locale} "${k}"`))
+    const baseParts = compiled.get(defaultLocale)
+    for (const [k, v] of flat) {
+      const parts = compile(v, `i18n ${locale} "${k}"`)
+      // Callers pass the arguments the default message names, so a translation can't ask for others.
+      if (baseParts) {
+        const known = argNames(baseParts.get(k)!)
+        const extra = [...argNames(parts)].filter((a) => !known.has(a))
+        if (extra.length) fail(`translation ${locale} "${k}" uses {${extra.join('}, {')}}, which the ${defaultLocale} message doesn't have.`)
+      }
+      m.set(k, parts)
+    }
     compiled.set(locale, m)
   }
   compileAll(defaultLocale, base)
@@ -202,7 +212,7 @@ export function defineI18n<const C extends Catalog>(options: I18nOptions<C>) {
           found = q ? match(q) : undefined
         } else if (d === 'cookie') {
           const c = /(?:^|;\s*)([^=;]+)=([^;]*)/g
-          for (const m of (request.headers.get('cookie') ?? '').matchAll(c)) if (m[1]!.trim() === cookieName) found = match(decodeURIComponent(m[2]!))
+          for (const m of (request.headers.get('cookie') ?? '').matchAll(c)) if (m[1]!.trim() === cookieName) found = match(safeDecode(m[2]!))
         } else {
           const h = request.headers.get('accept-language')
           found = h ? match(h) : undefined
@@ -235,6 +245,15 @@ export function defineI18n<const C extends Catalog>(options: I18nOptions<C>) {
     i18n,
     /** Untranslated keys per locale. */
     missing,
+  }
+}
+
+// A malformed cookie (`lang=%E0`) is ignored, not a 500.
+function safeDecode(v: string) {
+  try {
+    return decodeURIComponent(v)
+  } catch {
+    return ''
   }
 }
 

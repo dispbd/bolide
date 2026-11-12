@@ -26,6 +26,6 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.6"
   }
 }

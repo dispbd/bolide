@@ -86,15 +86,17 @@ async function input(where: string, schema: StandardSchemaV1 | undefined, value:
 }
 
 async function readJson(request: Request, limit: number) {
-  // Decide by what was read: Node adapters attach a stream to every POST, even an empty one.
+  // Requiring a JSON content type makes cross-site form posts need a CORS preflight (CSRF).
+  const type = request.headers.get('content-type')?.split(';')[0]!.trim().toLowerCase() ?? ''
+  const isJson = type === 'application/json' || type.endsWith('+json')
+  const notJson = () => new HttpError(415, 'request body must be JSON (Content-Type: application/json)')
+  // A declared non-JSON type fails before reading. A missing one waits for the bytes,
+  // because Node adapters attach a stream to every POST, even an empty one.
+  if (type && !isJson) throw notJson()
   const text = await readText(request, limit)
   // An empty body has nothing to forge; let the schema decide whether it's allowed.
   if (!text) return undefined
-  // Requiring a JSON content type makes cross-site form posts need a CORS preflight (CSRF).
-  const type = request.headers.get('content-type')?.split(';')[0]!.trim().toLowerCase() ?? ''
-  if (type !== 'application/json' && !type.endsWith('+json')) {
-    throw new HttpError(415, 'request body must be JSON (Content-Type: application/json)')
-  }
+  if (!isJson) throw notJson()
   try {
     return JSON.parse(text)
   } catch {

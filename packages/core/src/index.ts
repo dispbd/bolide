@@ -20,3 +20,16 @@ export { createApp, type App, type AppOptions } from './app.ts'
 export { AppEnv, defineConfig, type ConfigOptions, type Env } from './config.ts'
 export { openApiDocument, type OpenApiOptions } from './openapi.ts'
 export { defineGuard, defineMiddleware, type Guard, type Middleware, type MiddlewareContext, type Use } from './middleware.ts'
+export {
+  createLogger,
+  formatPretty,
+  Log,
+  RequestId,
+  RequestLog,
+  serializeError,
+  type LogFields,
+  type Logger,
+  type LoggerOptions,
+  type LogLevel,
+  type LogRecord,
+} from './log.ts'

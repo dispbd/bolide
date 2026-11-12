@@ -30,3 +30,32 @@ defineService({
   // @ts-expect-error a dependency that is not declared in inject
   factory: ({ cache }) => cache,
 })
+
+// Route handlers get typed input from their schemas and typed deps from inject.
+import { z } from 'zod'
+import { defineRoute } from '../src/route.ts'
+
+defineRoute({
+  method: 'POST',
+  path: '/users/:id',
+  params: z.object({ id: z.string() }),
+  body: z.object({ age: z.number() }),
+  inject: { users: Users },
+  handler: ({ params, body, query }, { users }) => {
+    const id: string = params.id
+    const age: number = body.age
+    const q: string | undefined = query.anything
+    users.count()
+    // @ts-expect-error body field not in the schema
+    body.name
+    return { id, age, q }
+  },
+})
+
+defineRoute({
+  method: 'GET',
+  path: '/x',
+  inject: { users: Users },
+  // @ts-expect-error dependency not declared in inject
+  handler: (_ctx, { db }) => db,
+})

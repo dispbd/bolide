@@ -1,3 +1,4 @@
+import type { AnyRoute } from './route.ts'
 import type { AnyService } from './service.ts'
 
 export interface Module {
@@ -9,6 +10,9 @@ export interface Module {
   readonly exports: readonly (AnyService | Module)[]
   /** A global module's exports are visible everywhere without importing it. */
   readonly global: boolean
+  readonly routes: readonly AnyRoute[]
+  /** Prepended to the paths of this module's own routes. */
+  readonly prefix: string
 }
 
 export interface ModuleOptions {
@@ -17,6 +21,8 @@ export interface ModuleOptions {
   providers?: readonly AnyService[]
   exports?: readonly (AnyService | Module)[]
   global?: boolean
+  routes?: readonly AnyRoute[]
+  prefix?: string
 }
 
 /**
@@ -31,5 +37,7 @@ export function defineModule(options: ModuleOptions): Module {
     providers: options.providers ?? [],
     exports: options.exports ?? [],
     global: options.global ?? false,
+    routes: options.routes ?? [],
+    prefix: options.prefix ?? '',
   }
 }

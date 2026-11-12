@@ -65,6 +65,7 @@ export class Container {
         }
       }
       for (const p of m.providers) this.checkDeps(m, p)
+      for (const r of m.routes) this.checkDeps(m, { name: `${r.method} ${m.prefix}${r.path}`, inject: r.inject }, 'route')
     }
     this.checkCycles()
   }
@@ -129,8 +130,8 @@ export class Container {
   }
 
   /** A per-request resolver. Request-scoped services are created lazily and disposed together. */
-  createScope(): RequestScope {
-    return new RequestScope(this)
+  createScope(seed?: ReadonlyMap<AnyService, unknown>): RequestScope {
+    return new RequestScope(this, seed)
   }
 
   /** @internal */
@@ -176,9 +177,15 @@ export class Container {
 }
 
 export class RequestScope {
-  private readonly instances = new Map<AnyService, unknown>()
+  private readonly instances: Map<AnyService, unknown>
   private readonly order: AnyService[] = []
-  constructor(private readonly container: Container) {}
+  constructor(
+    private readonly container: Container,
+    seed?: ReadonlyMap<AnyService, unknown>,
+  ) {
+    // Seeded values (such as the current Request) are provided by the caller, not built.
+    this.instances = new Map(seed)
+  }
 
   async resolve<S extends AnyService>(service: S): Promise<InstanceOf<S>> {
     const eff = this.container.effective(service)

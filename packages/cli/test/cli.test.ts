@@ -67,6 +67,37 @@ describe('bolide create', () => {
     assert.equal(pkg.dependencies['@bolide/core'], `^${version}`)
     assert.equal(pkg.devDependencies['@bolide/cli'], `^${version}`)
   })
+
+  test('--template todos writes the todos example, linked to the checkout, and it typechecks and passes its tests', async () => {
+    const dir = join(tmp, 'todos')
+    const out = capture()
+    assert.equal(await run(['create', dir, '--template', 'todos', '--local', repo], out.log), 0)
+    assert.match(out.text(), /npm run dev/)
+    const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+    assert.equal(pkg.name, 'todos')
+    assert.equal(pkg.dependencies['@bolide/react'], 'file:../../../../react')
+    assert.equal(pkg.devDependencies['@bolide/cli'], 'file:../../..')
+    assert.equal(await readFile(join(dir, '.gitignore'), 'utf8'), 'node_modules/\ndist/\n.env\n')
+    assert.match(await readFile(join(dir, 'migrations/0001_init.sql'), 'utf8'), /create table "todos"/)
+
+    execFileSync(process.execPath, [tsc, '-p', dir], { stdio: 'pipe' })
+    execFileSync(process.execPath, [tsxCli, '--test', 'test/todos.test.ts'], { stdio: 'pipe', cwd: dir })
+  })
+
+  test('an unknown template is refused with the list', async () => {
+    const err = capture()
+    assert.equal(await run(['create', join(tmp, 'x'), '--template', 'blog'], undefined, err.log), 1)
+    assert.match(err.text(), /unknown template "blog". Pick one of: default, todos/)
+  })
+})
+
+describe('the todos example', () => {
+  test('its first migration creates the tables its schema defines', async () => {
+    const { schemaSql } = await import('@bolide/data/server')
+    const { todos } = await import('../../../examples/todos/src/shared/schema.ts')
+    const migration = await readFile(new URL('../../../examples/todos/migrations/0001_init.sql', import.meta.url), 'utf8')
+    assert.ok(migration.includes(schemaSql([todos])), 'run `npm run db:sql` in examples/todos and update the migration')
+  })
 })
 
 describe('arguments', () => {

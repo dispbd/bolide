@@ -35,7 +35,7 @@ Mutators with `local: false` skip step 1's local run and change nothing until th
 
 ## Shapes
 
-`client.shape(shape)` returns a view with `rows()`, `status` (`loading`, `ready`, `error`), `ready` (a promise) and `subscribe(listener)`. The stream starts with the first subscriber and stops with the last. `rows()` returns the same array until something changes, which suits `useSyncExternalStore`. Rows hold the shape's columns only.
+`client.shape(shape)` returns a view with `rows()`, `status` (`loading`, `ready`, `error`), `ready` (a promise) and `subscribe(listener)`. The stream starts with the first subscriber and stops a tick after the last leaves, so a component that remounts at once (React StrictMode, a route change) keeps it. `rows()` returns the same array until something changes, which suits `useSyncExternalStore`. Rows hold the shape's columns only.
 
 ## Transports
 

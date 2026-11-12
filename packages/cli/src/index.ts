@@ -14,6 +14,7 @@ const help = `Usage: bolide <command> [options]
 Commands:
   create <dir>   Create a new Bolide project in <dir>
                  --local <path>  link @bolide/* from a local Bolide checkout
+                 --template <t>  default (an API) or todos (Postgres, live sync, React)
                  --force         write into a non-empty directory (existing files are kept)
   dev [entry]    Run the app and restart it when files change
                  (entry defaults to "bolide.entry" in package.json, then src/main.ts)
@@ -35,15 +36,16 @@ export async function run(argv: string[], out = console.log, err = console.error
         const { values, positionals } = parseArgs({
           args: rest,
           allowPositionals: true,
-          options: { local: { type: 'string' }, force: { type: 'boolean' } },
+          options: { local: { type: 'string' }, force: { type: 'boolean' }, template: { type: 'string' } },
         })
         if (positionals.length !== 1) throw new UsageError('create needs exactly one directory, e.g. `bolide create my-app`.')
-        const result = await create({ dir: positionals[0]!, local: values.local, force: values.force })
+        const result = await create({ dir: positionals[0]!, local: values.local, force: values.force, template: values.template })
         if (result.kept.length) out(`Kept existing files: ${result.kept.join(', ')}`)
         if (result.kept.includes('package.json')) {
           out(`Your package.json was kept. Merge these fields into it:\n${JSON.stringify(result.packageFields, null, 2)}`)
         }
-        out(`Created ${result.name} in ${result.dir}\n\nNext:\n  cd ${positionals[0]}\n  npm install\n  npm run dev`)
+        const db = result.template === 'todos' ? '\n  docker compose up -d postgres   # or point DATABASE_URL at your own Postgres\n  npm run db:migrate' : ''
+        out(`Created ${result.name} in ${result.dir}\n\nNext:\n  cd ${positionals[0]}\n  npm install${db}\n  npm run dev`)
         return 0
       }
       case 'dev': {

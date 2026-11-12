@@ -314,13 +314,16 @@ export function createClient(options: ClientOptions) {
         }
         return () => {
           state.listeners.delete(listener)
-          if (!state.listeners.size && state.stop) {
-            state.stop()
-            state.stop = undefined
-            state.rows.clear()
-            state.status = 'loading'
-            void rebuild()
-          }
+          // Wait a tick: a component that remounts at once (React StrictMode, a route change) keeps the stream.
+          if (!state.listeners.size)
+            setTimeout(() => {
+              if (state.listeners.size || !state.stop) return
+              state.stop()
+              state.stop = undefined
+              state.rows.clear()
+              state.status = 'loading'
+              void rebuild()
+            }, 0)
         }
       },
     }
@@ -445,7 +448,10 @@ export function createClient(options: ClientOptions) {
     pending: () => pending.map((p) => p.handle) as readonly Mutation[],
     /** Stops every shape stream. */
     close() {
-      for (const s of shapes.values()) s.stop?.()
+      for (const s of shapes.values()) {
+        s.stop?.()
+        s.stop = undefined
+      }
       shapes.clear()
     },
   }

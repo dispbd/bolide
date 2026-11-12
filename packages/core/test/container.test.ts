@@ -195,6 +195,14 @@ describe('overrides', () => {
     )
   })
 
+  test('a deeper singleton -> request chain under an override fails in start() with a hint', async () => {
+    const Ctx = defineService({ name: 'Ctx', scope: 'request', factory: () => ({ id: 1 }) })
+    const Helper = defineService({ name: 'Helper', inject: { ctx: Ctx }, factory: () => ({}) })
+    const FakeDb = defineService({ name: 'FakeDb', inject: { helper: Helper }, factory: () => ({ rows: new Map<string, string>() }) })
+    const c = new Container({ modules: [defineModule({ name: 'app', providers: [Ctx, Db, Users] })], overrides: [override(Db, { useService: FakeDb })] })
+    await assert.rejects(c.start(), /singleton "Helper" cannot inject request-scoped "Ctx". Make "Helper" request-scoped too/)
+  })
+
   test('overriding a dependency with a request-scoped service fails at boot', () => {
     const ReqDb = defineService({ name: 'ReqDb', scope: 'request', factory: () => ({ rows: new Map<string, string>() }) })
     assert.throws(

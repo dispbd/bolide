@@ -42,7 +42,8 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
     for (const route of m.routes) {
       const path = joinPath(m.prefix, route.path)
       // Param names don't matter to the router: /users/:id and /users/:userId clash.
-      const key = `${route.method} ${path.replace(/\/:[^/]+/g, '/:')}`
+      // Regex constraints and `?` do, so /:id{[0-9]+} and /:slug{[a-z]+} don't.
+      const key = `${route.method} ${path.replace(/\/:[^/{?]+/g, '/:')}`
       const clash = seen.get(key)
       if (clash) {
         const where = clash.module === m.name ? `twice in "${m.name}"` : `in both "${clash.module}" and "${m.name}"`
@@ -67,7 +68,6 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
           return errorResponse(e, request, onError)
         } finally {
           // Request-scoped instances end when the handler returns, before a streamed body is read.
-          // Request-scoped instances end when the handler returns, before a streamed body is read.
           await scope.dispose().catch((e) => onError(e, request))
         }
       })
@@ -88,6 +88,8 @@ async function input(where: string, schema: StandardSchemaV1 | undefined, value:
 async function readJson(request: Request, limit: number) {
   // Requiring a JSON content type makes cross-site form posts need a CORS preflight (CSRF).
   const type = request.headers.get('content-type')?.split(';')[0]!.trim().toLowerCase() ?? ''
+  // No body at all: let the schema decide whether that's allowed.
+  if (!type && !request.body) return undefined
   if (type !== 'application/json' && !type.endsWith('+json')) {
     throw new HttpError(415, 'request body must be JSON (Content-Type: application/json)')
   }
@@ -132,14 +134,14 @@ function toResponse(result: unknown, status: number): Response {
 
 function errorResponse(e: unknown, request: Request, onError: ErrorReporter): Response {
   if (e instanceof ValidationError) {
-    return Response.json({ error: 'validation_failed', where: e.where, issues: e.issues }, { status: 400 })
+    return Response.json({ error: 'validation_failed', message: e.message, where: e.where, issues: e.issues }, { status: 400 })
   }
   if (e instanceof HttpError) {
     const body = { error: e.code, message: e.message, ...(e.details === undefined ? {} : { details: e.details }) }
     return Response.json(body, { status: e.status })
   }
   onError(e, request)
-  return Response.json({ error: 'internal_error' }, { status: 500 })
+  return Response.json({ error: 'internal_error', message: 'internal server error' }, { status: 500 })
 }
 
 function joinPath(prefix: string, path: string) {

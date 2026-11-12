@@ -156,7 +156,7 @@ export class Container {
     const eff = this.effective(s)
     if (eff.scope === 'request') {
       // checkDeps should have caught this at construction; never hand a singleton `undefined`.
-      if (path.length) throw new DependencyError(`singleton "${path.at(-1)!.name}" cannot inject request-scoped "${s.name}".`)
+      if (path.length) throw new DependencyError(`singleton "${path.at(-1)!.name}" cannot inject request-scoped "${s.name}". Make "${path.at(-1)!.name}" request-scoped too, or inject a singleton.`)
       return undefined
     }
     const deps: Record<string, unknown> = {}

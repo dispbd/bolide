@@ -108,3 +108,38 @@ const port: number = cfg.port
 void port
 // @ts-expect-error configs are read-only
 cfg.port = 1
+
+// Without schemas, params and query are plain string records.
+defineRoute({
+  method: 'GET',
+  path: '/plain/:id',
+  handler: ({ params, query }) => {
+    const id: string | undefined = params.id
+    const q: string | undefined = query.q
+    // @ts-expect-error values are strings
+    const n: number = params.id
+    return { id, q, n }
+  },
+})
+
+// A query schema types the query, including coercion and defaults.
+defineRoute({
+  method: 'GET',
+  path: '/search',
+  query: z.object({ q: z.string(), limit: z.coerce.number().default(10) }),
+  handler: ({ query }) => {
+    const limit: number = query.limit
+    // @ts-expect-error not in the schema
+    query.other
+    return { q: query.q, limit }
+  },
+})
+
+// defineValue infers its type from the value.
+import { defineValue } from '../src/service.ts'
+const Flags = defineValue('Flags', { beta: true })
+const flags = null as unknown as InstanceOf<typeof Flags>
+const beta: boolean = flags.beta
+void beta
+// @ts-expect-error unknown flag
+flags.gamma

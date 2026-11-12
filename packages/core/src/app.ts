@@ -40,7 +40,11 @@ export async function createApp(options: AppOptions): Promise<App> {
     overrides: [{ provide: AppEnv, useValue: options.env ?? processEnv() }, ...(options.overrides ?? [])],
   })
   const onError = options.onError ?? ((e, req) => console.error(`[bolide] ${req.method} ${req.url}`, e))
-  const http = buildHttp(container, container.modules, onError, { bodyLimit: options.bodyLimit ?? 1024 * 1024 })
+  const bodyLimit = options.bodyLimit ?? 1024 * 1024
+  if (!(bodyLimit === Infinity || (Number.isInteger(bodyLimit) && bodyLimit >= 0))) {
+    throw new BolideError(`bodyLimit must be a non-negative integer (bytes) or Infinity, got ${bodyLimit}.`)
+  }
+  const http = buildHttp(container, container.modules, onError, { bodyLimit })
   const docs = options.openapi && serveOpenApi(http.routes, options.openapi)
   await container.start()
   return {

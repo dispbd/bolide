@@ -116,7 +116,7 @@ describe('routes', () => {
     const app = await createApp({ modules: [m], onError: (e) => void reported.push(e) })
     const res = await call(app, 'GET', '/boom')
     assert.equal(res.status, 500)
-    assert.deepEqual(await res.json(), { error: 'internal_error' })
+    assert.deepEqual(await res.json(), { error: 'internal_error', message: 'internal server error' })
     assert.equal((reported[0] as Error).message, 'secret detail')
   })
 
@@ -198,6 +198,30 @@ describe('request body', () => {
     const res = await post(app, { body: '{oops', headers: { 'content-type': 'application/json' } })
     assert.equal(res.status, 400)
     assert.deepEqual(await res.json(), { error: 'bad_request', message: 'request body is not valid JSON' })
+  })
+})
+
+describe('request body edge cases', () => {
+  test('no body and no Content-Type reaches the schema', async () => {
+    const m = defineModule({ name: 'm', routes: [defineRoute({ method: 'POST', path: '/opt', body: z.object({ a: z.number() }).optional(), handler: ({ body }) => ({ got: body ?? null }) })] })
+    const app = await createApp({ modules: [m] })
+    const res = await app.fetch(new Request('http://x/opt', { method: 'POST' }))
+    assert.equal(res.status, 200)
+    assert.deepEqual(await res.json(), { got: null })
+  })
+
+  test('an invalid bodyLimit fails at boot', async () => {
+    await assert.rejects(createApp({ modules: [users], bodyLimit: Number.NaN }), /bodyLimit must be/)
+    await assert.rejects(createApp({ modules: [users], bodyLimit: -1 }), /bodyLimit must be/)
+    await createApp({ modules: [users], bodyLimit: Infinity })
+  })
+
+  test('constrained params with different patterns do not clash', async () => {
+    const a = defineRoute({ method: 'GET', path: '/f/:id{[0-9]+}', handler: () => 'id' })
+    const b = defineRoute({ method: 'GET', path: '/f/:slug{[a-z-]+}', handler: () => 'slug' })
+    const app = await createApp({ modules: [defineModule({ name: 'm', routes: [a, b] })] })
+    assert.equal(await (await app.fetch(new Request('http://x/f/12'))).json(), 'id')
+    assert.equal(await (await app.fetch(new Request('http://x/f/ab-c'))).json(), 'slug')
   })
 })
 

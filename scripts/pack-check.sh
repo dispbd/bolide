@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail -w @bolide/storage -w @bolide/i18n -w @bolide/data -w @bolide/client --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail -w @bolide/storage -w @bolide/i18n -w @bolide/data -w @bolide/client -w @bolide/react --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -24,6 +24,7 @@ p.dependencies['@bolide/storage'] = tgz('storage')
 p.dependencies['@bolide/i18n'] = tgz('i18n')
 p.dependencies['@bolide/data'] = tgz('data')
 p.dependencies['@bolide/client'] = tgz('client')
+p.dependencies['@bolide/react'] = tgz('react')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
@@ -98,6 +99,8 @@ const { schemaSql } = await import('@bolide/data/server')
 if (!schemaSql([defineTable('notes', { id: t.uuid().primaryKey() })]).includes('create table \"notes\"')) process.exit(1)
 const { createClient } = await import('@bolide/client')
 if (typeof createClient({ transport: { subscribe: () => () => {} }, mutators: [] }).mutate !== 'function') process.exit(1)
+const { useShape } = await import('@bolide/react')
+if (typeof useShape !== 'function') process.exit(1)
 const { Storage, storageModule } = await import('@bolide/storage')
 const st = await createApp({ modules: [storageModule()], logger: createLogger({ level: 'error' }) })
 await st.get(Storage).put('a/b.txt', 'hi')

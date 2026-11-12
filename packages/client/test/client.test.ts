@@ -185,4 +185,19 @@ describe('client', () => {
     client.close()
     assert.equal(stopped(), 1)
   })
+
+  test('a stream outlives an unsubscribe that is followed at once by a subscribe', async () => {
+    const { client, sinks, stopped } = setup()
+    const other = defineShape('todos.all', todos)
+    const v = client.shape(other)
+    v.subscribe(() => {})()
+    const off = v.subscribe(() => {}) // a remount in the same tick
+    await tick()
+    assert.equal(stopped(), 0, 'kept')
+    assert.ok(sinks.has('todos.all'))
+    off()
+    await tick()
+    assert.equal(stopped(), 1, 'stopped once nobody came back')
+    client.close()
+  })
 })

@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "pretest:core": "npm run build",
     "test:core": "LOG_LEVEL=warn tsx --conditions=bolide-source --test packages/*/test/*.test.ts",
-    "build": "npm run build -w @bolide/core && npm run build -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/storage && npm run build -w @bolide/mail",
+    "build": "npm run build -w @bolide/core && npm run build -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/storage -w @bolide/i18n && npm run build -w @bolide/mail",
     "pretest": "npm run build",
     "pack:check": "bash scripts/pack-check.sh"
   },

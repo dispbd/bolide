@@ -18,7 +18,14 @@ An experimental Node.js/TypeScript framework that combines:
 
 | Package | Status |
 |---|---|
-| [`@bolide/core`](packages/core) | Phase 1, in progress: modules, DI, routes, config. |
+| [`@bolide/core`](packages/core) | Modules, DI, routes, validation, config, OpenAPI, middleware, logging, tracing. |
+| [`@bolide/cli`](packages/cli) | `bolide create`, `bolide dev`. |
+| [`@bolide/cache`](packages/cache) | Cache with memory and Redis drivers. |
+| [`@bolide/queue`](packages/queue) | Background jobs and cron, memory and Postgres drivers. |
+| [`@bolide/auth`](packages/auth) | Sessions, passwords, guards, CSRF protection. |
+| [`@bolide/mail`](packages/mail) | Mailer with memory, console, SMTP and HTTP transports. |
+| [`@bolide/storage`](packages/storage) | Files on memory, disk or S3-compatible services; uploads. |
+| [`@bolide/i18n`](packages/i18n) | Typed messages, ICU plurals, locale detection. |
 
 ## Roadmap
 

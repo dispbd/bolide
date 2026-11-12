@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail -w @bolide/storage --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail -w @bolide/storage -w @bolide/i18n --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -21,6 +21,7 @@ p.dependencies['@bolide/queue'] = tgz('queue')
 p.dependencies['@bolide/auth'] = tgz('auth')
 p.dependencies['@bolide/mail'] = tgz('mail')
 p.dependencies['@bolide/storage'] = tgz('storage')
+p.dependencies['@bolide/i18n'] = tgz('i18n')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
@@ -37,6 +38,11 @@ defineService({ name: 'y', inject: { cache: Cache }, factory: async ({ cache }) 
   await cache.set('k', 1, { ttl: '5 minutes' })
   return cache.wrap('k', () => 1)
 } })
+import { defineI18n } from '@bolide/i18n'
+const { i18n } = defineI18n({ defaultLocale: 'en', messages: { hi: 'Hi {name}' } })
+i18n.in('en').t('hi', { name: 'x' })
+// @ts-expect-error the message needs a name
+i18n.in('en').t('hi')
 import { defineJob, Queue } from '@bolide/queue'
 const Ping = defineJob({ name: 'ping', handler: () => {} })
 defineService({ name: 'z', inject: { queue: Queue }, factory: async ({ queue }) => {

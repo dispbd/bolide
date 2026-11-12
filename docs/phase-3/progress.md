@@ -6,8 +6,8 @@ Plan: [plan.md](plan.md).
 |---|---|---|
 | 1 | Tables (`phase-3-schema`) | Done. `@bolide/data`: `defineTable` with column builders, inferred `Row`/`Insert`/`Patch`, tables as Standard Schema validators, camelCase↔snake_case mapping, `schemaSql` (DDL ordered by references), `readMigrations`/`migrate` (one transaction, advisory lock, checksums). Unit tests and an integration test on Postgres. |
 | 2 | Mutators on the server (`phase-3-mutate`) | Done. `defineMutator` with typed `tx.get/insert/update/delete`, `MutatorError` codes mapped to statuses, `local: false` for server-only mutators. `dataModule` serves `POST /api/data/mutate` in a Postgres transaction and answers the `txid`; mutation ids make retries idempotent (`bolide_mutations`); `userId` comes from a request-scoped service; `onServer()` adds injected services without touching the browser bundle. Integration tests on Postgres. |
-| 3 | Shapes and read permissions (`phase-3-shapes`) | Next. |
-| 4 | Client (`phase-3-client`) | |
+| 3 | Shapes and read permissions (`phase-3-shapes`) | Done. `defineShape(name, table, { where, columns })`; `whereSql` builds parameterised SQL from typed conditions; `electric()` sync source; `GET /api/data/shape/:name` applies the rule per request (401/403 on `false`), passes only Electric protocol params and makes caching private. Unit tests with a fake source; the where SQL is checked on Postgres. A test against a running Electric comes with the todos example (step 6). |
+| 4 | Client (`phase-3-client`) | Next. |
 | 5 | Development without Docker, `bolide db` (`phase-3-dev`) | |
 | 6 | React (`phase-3-react`) | |
 | 7 | Vue (`phase-3-vue`) | |

@@ -53,6 +53,7 @@ describe('bolide create', () => {
     assert.equal(await run(['create', dir, '--force'], out.log), 0)
     assert.equal(await readFile(join(dir, 'package.json'), 'utf8'), '{"name":"mine"}')
     assert.match(out.text(), /Kept existing files: .*package\.json/)
+    assert.match(out.text(), /Your package.json was kept. Add to it:[\s\S]*"@bolide\/core"[\s\S]*"dev": "bolide dev"/)
   })
 
   test('pins published versions to the CLI version by default', async () => {

@@ -33,6 +33,14 @@ export async function run(argv: string[], out = console.log, err = console.error
         if (positionals.length !== 1) throw new UsageError('create needs exactly one directory, e.g. `bolide create my-app`.')
         const result = await create({ dir: positionals[0]!, local: values.local, force: values.force })
         if (result.kept.length) out(`Kept existing files: ${result.kept.join(', ')}`)
+        if (result.kept.includes('package.json')) {
+          out(
+            'Your package.json was kept. Add to it:\n' +
+              `  "dependencies": { "@bolide/core": "${result.deps.core}", "@hono/node-server": "^2.1.5", "zod": "^4.6.7" }\n` +
+              `  "devDependencies": { "@bolide/cli": "${result.deps.cli}", "tsx": "^4.23.15" }\n` +
+              '  "scripts": { "dev": "bolide dev" }',
+          )
+        }
         out(`Created ${result.name} in ${result.dir}\n\nNext:\n  cd ${positionals[0]}\n  npm install\n  npm run dev`)
         return 0
       }

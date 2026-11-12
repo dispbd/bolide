@@ -48,7 +48,7 @@ export async function create(options: CreateOptions) {
     await writeFile(target, content)
     written.push(path)
   }
-  return { dir, name, files: written, kept }
+  return { dir, name, files: written, kept, deps: { core: link('core'), cli: link('cli') } }
 }
 
 /** npm package names are lowercase and URL-safe. */

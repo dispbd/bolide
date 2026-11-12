@@ -34,3 +34,5 @@ export {
   type LogRecord,
 } from './log.ts'
 export { toMs, type Duration } from './duration.ts'
+export { noopTracer, Tracer, type Span, type SpanAttributes, type SpanOptions } from './trace.ts'
+export { otelTracer, type OtelApi } from './otel.ts'

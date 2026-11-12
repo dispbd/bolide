@@ -5,6 +5,7 @@ import type { MiddlewareContext, Use } from './middleware.ts'
 import type { Module } from './module.ts'
 import type { AnyRoute, Method } from './route.ts'
 import { RequestId, type Logger } from './log.ts'
+import type { Span, Tracer } from './trace.ts'
 import { parse, type StandardSchemaV1 } from './schema.ts'
 import { defineService, type AnyService } from './service.ts'
 
@@ -47,6 +48,8 @@ export interface HttpOptions {
   prelude?: (routes: readonly RouteInfo[]) => (request: Request) => Response | undefined
   /** Writes one line per request to this logger when set. */
   accessLog?: () => Logger
+  /** Wraps each request in a server span. */
+  tracer?: () => Tracer
 }
 
 export function buildHttp(container: Container, modules: readonly Module[], onError: ErrorReporter, options: HttpOptions) {
@@ -103,10 +106,22 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
   const prelude = options.prelude?.(routes)
   const appUse = options.use ?? []
   const access = options.accessLog
-  const fetch = async (request: Request) => {
+  const fetch = (request: Request) => {
+    const path = new URL(request.url).pathname
+    if (!options.tracer) return serve(request, path)
+    return options.tracer().span(request.method, (span) => serve(request, path, span), {
+      kind: 'server',
+      parent: request.headers,
+      attributes: { 'http.request.method': request.method, 'url.path': path },
+    })
+  }
+  const serve = async (request: Request, path: string, span?: Span) => {
     const started = performance.now()
     const requestId = incomingId(request.headers.get('x-request-id')) ?? crypto.randomUUID()
-    const report = (e: unknown, r: Request) => onError(e, r, { requestId })
+    const report = (e: unknown, r: Request) => {
+      span?.recordError(e)
+      onError(e, r, { requestId })
+    }
     const matched: RequestEnv['matched'] = {}
     const scope = container.createScope(
       new Map<AnyService, unknown>([
@@ -126,9 +141,15 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
     }
     // An id the app set itself (say, from its own tracing) wins.
     if (!res.headers.has('x-request-id')) res = withHeader(res, 'x-request-id', requestId)
+    if (span) {
+      span.setAttribute('http.response.status_code', res.status)
+      if (matched.route) {
+        span.updateName(`${request.method} ${matched.route}`)
+        span.setAttribute('http.route', matched.route)
+      }
+    }
     if (access) {
       const ms = Math.round((performance.now() - started) * 10) / 10
-      const path = new URL(request.url).pathname
       const at = res.status >= 500 ? 'error' : res.status >= 400 ? 'warn' : 'info'
       access()[at](`${request.method} ${path} ${res.status} ${ms}ms`, {
         reqId: requestId,
@@ -137,6 +158,7 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
         ...(matched.route ? { route: matched.route } : {}),
         status: res.status,
         ms,
+        ...(span?.traceId ? { traceId: span.traceId } : {}),
       })
     }
     return res

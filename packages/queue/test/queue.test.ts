@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { createApp, createLogger, defineModule, defineService, override, ValidationError, type LogRecord } from '@bolide/core'
+import { createApp, createLogger, defineModule, defineService, override, ValidationError, type LogRecord, type Tracer } from '@bolide/core'
 import { defineJob, defineSchedule, memoryQueue, Queue, QueueDriver, queueModule } from '../src/index.ts'
 
 const quiet = createLogger({ write: () => {} })
@@ -169,6 +169,26 @@ describe('jobs', () => {
     await new Promise((r) => setTimeout(r, 5))
     assert.equal(driver.messages()[0]!.status, 'pending')
     await assert.rejects(app.get(Queue).idle(), /needs a worker/)
+    await app.close()
+  })
+
+  test('each run is a consumer span; failures are recorded on it', async () => {
+    const spans: { name: string; kind?: string; attributes?: object; errors: unknown[] }[] = []
+    const tracer: Tracer = {
+      span: async (name, fn, o) => {
+        const s = { name, kind: o?.kind, attributes: o?.attributes, errors: [] as unknown[] }
+        spans.push(s)
+        return fn({ setAttribute() {}, updateName() {}, recordError: (e) => void s.errors.push(e) })
+      },
+    }
+    const Fails = defineJob({ name: 'fails', retries: 0, handler: () => Promise.reject(new Error('x')) })
+    const app = await createApp({ modules: [queueModule({ jobs: [Fails] })], logger: quiet, tracer })
+    await app.get(Queue).enqueue(Fails)
+    await app.get(Queue).idle()
+    const job = spans.find((s) => s.name === 'job fails')!
+    assert.equal(job.kind, 'consumer')
+    assert.deepEqual(job.attributes, { 'job.name': 'fails', 'job.id': '1', 'job.attempt': 1 })
+    assert.equal((job.errors[0] as Error).message, 'x')
     await app.close()
   })
 

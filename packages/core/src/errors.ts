@@ -35,14 +35,38 @@ export class ConfigError extends BolideError {
   }
 }
 
-/** Throw from a route handler to send a specific status. */
+const codes: Record<number, string> = {
+  400: 'bad_request',
+  401: 'unauthorized',
+  403: 'forbidden',
+  404: 'not_found',
+  405: 'method_not_allowed',
+  409: 'conflict',
+  413: 'payload_too_large',
+  415: 'unsupported_media_type',
+  422: 'unprocessable_entity',
+  429: 'too_many_requests',
+  500: 'internal_error',
+  503: 'service_unavailable',
+}
+
+/**
+ * Throw from a route handler to send an error status. The client gets
+ * `{ error: code, message, details? }`, where `code` defaults to a name for the status.
+ */
 export class HttpError extends BolideError {
   override name = 'HttpError'
+  readonly code: string
   constructor(
     readonly status: number,
     message: string,
     readonly details?: unknown,
+    code?: string,
   ) {
+    if (!Number.isInteger(status) || status < 400 || status > 599) {
+      throw new RangeError(`HttpError status must be 400-599, got ${status}. Return a Response for other statuses.`)
+    }
     super(message)
+    this.code = code ?? codes[status] ?? `http_${status}`
   }
 }

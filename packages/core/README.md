@@ -46,12 +46,16 @@ await listen(app, { port: 3000 })
 ## Scopes and lifecycle
 
 - `singleton` (default): created at boot in dependency order; `onInit` after its deps, `onDestroy` in reverse order on `app.close()`.
-- `request`: created lazily per request, disposed when the response is sent. Inject `CurrentRequest` to read the request.
+- `request`: created lazily per request, disposed when the handler returns (before a streamed body is read). Inject `CurrentRequest` to read the request.
 
 ## Errors
 
 | Thrown | Response |
 |---|---|
 | validation failure | 400 `{ error: 'validation_failed', where, issues }` |
-| `HttpError(status, message, details?)` | `status` `{ error, details? }` |
+| `HttpError(status, message, details?, code?)` | `status` (400-599) `{ error: code, message, details? }`; `code` defaults to a name for the status, e.g. `not_found` |
+| body without a JSON `Content-Type` | 415 `{ error: 'unsupported_media_type', message }` (blocks CSRF via simple requests) |
+| body over `bodyLimit` (`createApp` option, default 1 MiB) | 413 `{ error: 'payload_too_large', message }` |
 | anything else | 500 `{ error: 'internal_error' }`, reported to `onError` |
+
+The body is read only for routes with a `body` schema; otherwise `ctx.body` is `undefined` and the raw `request` is there.

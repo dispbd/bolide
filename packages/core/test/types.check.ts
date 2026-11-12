@@ -52,6 +52,18 @@ defineRoute({
   },
 })
 
+// Without a body schema the body is not read, so it is typed as undefined.
+defineRoute({
+  method: 'POST',
+  path: '/raw',
+  handler: ({ body }) => {
+    const none: undefined = body
+    // @ts-expect-error no body schema, no body fields
+    body.anything
+    return none
+  },
+})
+
 defineRoute({
   method: 'GET',
   path: '/x',

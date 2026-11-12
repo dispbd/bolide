@@ -28,18 +28,27 @@ export type ErrorReporter = (error: unknown, request: Request) => void
  * Turns the modules' routes into a Hono app. Hono stays an implementation
  * detail (ADR 0001): user code only sees Request, Response and our types.
  */
-export function buildHttp(container: Container, modules: readonly Module[], onError: ErrorReporter) {
+export interface HttpOptions {
+  /** Max request body size in bytes for routes with a `body` schema. Larger bodies get 413. */
+  bodyLimit: number
+}
+
+export function buildHttp(container: Container, modules: readonly Module[], onError: ErrorReporter, options: HttpOptions) {
   const hono = new Hono()
   const routes: RouteInfo[] = []
-  const seen = new Map<string, string>()
+  const seen = new Map<string, { module: string; path: string }>()
 
   for (const m of modules) {
     for (const route of m.routes) {
       const path = joinPath(m.prefix, route.path)
-      const key = `${route.method} ${path}`
+      // Param names don't matter to the router: /users/:id and /users/:userId clash.
+      const key = `${route.method} ${path.replace(/\/:[^/]+/g, '/:')}`
       const clash = seen.get(key)
-      if (clash) throw new BolideError(`route ${key} is defined in both "${clash}" and "${m.name}".`)
-      seen.set(key, m.name)
+      if (clash) {
+        const where = clash.module === m.name ? `twice in "${m.name}"` : `in both "${clash.module}" and "${m.name}"`
+        throw new BolideError(`route ${route.method} ${path} clashes with ${route.method} ${clash.path}: defined ${where}.`)
+      }
+      seen.set(key, { module: m.name, path })
       routes.push({ method: route.method, path, module: m.name, route })
 
       hono.on(route.method, path, async (c) => {
@@ -49,7 +58,7 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
           const ctx = {
             params: await input('params', route.params, c.req.param()),
             query: await input('query', route.query, c.req.query()),
-            body: route.body ? await input('body', route.body, await readJson(request)) : undefined,
+            body: route.body ? await input('body', route.body, await readJson(request, options.bodyLimit)) : undefined,
             request,
           }
           const deps = await scope.resolveAll(route.inject)
@@ -57,6 +66,8 @@ export function buildHttp(container: Container, modules: readonly Module[], onEr
         } catch (e) {
           return errorResponse(e, request, onError)
         } finally {
+          // Request-scoped instances end when the handler returns, before a streamed body is read.
+          // Request-scoped instances end when the handler returns, before a streamed body is read.
           await scope.dispose().catch((e) => onError(e, request))
         }
       })
@@ -74,14 +85,43 @@ async function input(where: string, schema: StandardSchemaV1 | undefined, value:
   return result.value
 }
 
-async function readJson(request: Request) {
-  const text = await request.text()
+async function readJson(request: Request, limit: number) {
+  // Requiring a JSON content type makes cross-site form posts need a CORS preflight (CSRF).
+  const type = request.headers.get('content-type')?.split(';')[0]!.trim().toLowerCase() ?? ''
+  if (type !== 'application/json' && !type.endsWith('+json')) {
+    throw new HttpError(415, 'request body must be JSON (Content-Type: application/json)')
+  }
+  const text = await readText(request, limit)
   if (!text) return undefined
   try {
     return JSON.parse(text)
   } catch {
     throw new HttpError(400, 'request body is not valid JSON')
   }
+}
+
+async function readText(request: Request, limit: number) {
+  const tooLarge = () => new HttpError(413, `request body exceeds ${limit} bytes`)
+  if (Number(request.headers.get('content-length') ?? 0) > limit) throw tooLarge()
+  if (!request.body) return ''
+  // Content-Length can be absent (chunked) or wrong, so count the bytes as they arrive.
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > limit) {
+      await reader.cancel().catch(() => {})
+      throw tooLarge()
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const c of chunks) bytes.set(c, (offset += c.byteLength) - c.byteLength)
+  return new TextDecoder().decode(bytes)
 }
 
 function toResponse(result: unknown): Response {
@@ -95,7 +135,8 @@ function errorResponse(e: unknown, request: Request, onError: ErrorReporter): Re
     return Response.json({ error: 'validation_failed', where: e.where, issues: e.issues }, { status: 400 })
   }
   if (e instanceof HttpError) {
-    return Response.json({ error: e.message, ...(e.details === undefined ? {} : { details: e.details }) }, { status: e.status })
+    const body = { error: e.code, message: e.message, ...(e.details === undefined ? {} : { details: e.details }) }
+    return Response.json(body, { status: e.status })
   }
   onError(e, request)
   return Response.json({ error: 'internal_error' }, { status: 500 })

@@ -13,11 +13,22 @@ export function listen(app: App, options: ListenOptions = {}) {
   return new Promise<{ port: number; close(): Promise<void> }>((resolve, reject) => {
     const server = serve({ fetch: app.fetch, port: options.port ?? 3000, hostname: options.hostname }, (info) => {
       server.off('error', reject)
+      const signals = ['SIGINT', 'SIGTERM'] as const
+      const onSignal = () => {
+        close().catch((e) => {
+          console.error('[bolide] shutdown failed', e)
+          process.exitCode = 1
+        })
+      }
       let closing: Promise<void> | undefined
       const close = () =>
-        (closing ??= new Promise<void>((done) => server.close(() => done())).then(() => app.close()))
+        (closing ??= (async () => {
+          for (const signal of signals) process.off(signal, onSignal)
+          await new Promise<void>((done) => server.close(() => done()))
+          await app.close()
+        })())
       if (options.handleSignals ?? true) {
-        for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => void close())
+        for (const signal of signals) process.once(signal, onSignal)
       }
       resolve({ port: info.port, close })
     })

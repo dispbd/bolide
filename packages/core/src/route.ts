@@ -11,8 +11,11 @@ export interface RouteContext<P extends Maybe, Q extends Maybe, B extends Maybe>
   params: Or<P, Record<string, string>>
   /** Query string, validated when `query` has a schema. Repeated keys keep the last value. */
   query: Or<Q, Record<string, string>>
-  /** JSON body, validated when `body` has a schema. */
-  body: Or<B, unknown>
+  /**
+   * JSON body, read and validated only when the route has a `body` schema (otherwise `undefined`;
+   * use `request` for raw access). Needs a JSON Content-Type (else 415) and fits `bodyLimit` (else 413).
+   */
+  body: Or<B, undefined>
   request: Request
 }
 

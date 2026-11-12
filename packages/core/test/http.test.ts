@@ -48,7 +48,13 @@ const search = defineRoute({
 const users = defineModule({ name: 'users', prefix: '/users', providers: [Users], routes: [search, getUser, createUser] })
 
 const call = (app: { fetch(r: Request): Promise<Response> }, method: string, path: string, body?: unknown) =>
-  app.fetch(new Request(`http://test${path}`, { method, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) }))
+  app.fetch(
+    new Request(`http://test${path}`, {
+      method,
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
+    }),
+  )
 
 describe('routes', () => {
   test('validated params reach the handler', async () => {
@@ -88,7 +94,7 @@ describe('routes', () => {
     const app = await createApp({ modules: [users] })
     const res = await call(app, 'GET', '/users/00000000-0000-4000-8000-000000000009')
     assert.equal(res.status, 404)
-    assert.deepEqual(await res.json(), { error: 'user not found' })
+    assert.deepEqual(await res.json(), { error: 'not_found', message: 'user not found' })
   })
 
   test('undefined gives 204, a Response passes through', async () => {
@@ -155,7 +161,51 @@ describe('boot-time route checks', () => {
 
   test('the same method and path twice', async () => {
     const r = defineRoute({ method: 'GET', path: '/x', handler: () => 1 })
-    await assert.rejects(createApp({ modules: [defineModule({ name: 'a', routes: [r] }), defineModule({ name: 'b', routes: [r] })] }), /GET \/x is defined in both "a" and "b"/)
+    await assert.rejects(createApp({ modules: [defineModule({ name: 'a', routes: [r] }), defineModule({ name: 'b', routes: [r] })] }), /GET \/x clashes with GET \/x: defined in both "a" and "b"/)
+  })
+
+  test('routes that differ only in param names clash', async () => {
+    const a = defineRoute({ method: 'GET', path: '/u/:id', handler: () => 1 })
+    const b = defineRoute({ method: 'GET', path: '/u/:userId', handler: () => 2 })
+    await assert.rejects(createApp({ modules: [defineModule({ name: 'm', routes: [a, b] })] }), /GET \/u\/:userId clashes with GET \/u\/:id: defined twice in "m"/)
+  })
+})
+
+describe('request body', () => {
+  const id = '00000000-0000-4000-8000-000000000003'
+  const post = (app: { fetch(r: Request): Promise<Response> }, init: RequestInit) => app.fetch(new Request('http://x/users', { method: 'POST', ...init }))
+
+  test('a non-JSON content type gets 415 (no CSRF via simple requests)', async () => {
+    const app = await createApp({ modules: [users] })
+    const res = await post(app, { body: JSON.stringify({ id, name: 'eve' }), headers: { 'content-type': 'text/plain' } })
+    assert.equal(res.status, 415)
+    assert.equal((await res.json()).error, 'unsupported_media_type')
+    assert.equal((await post(app, { body: JSON.stringify({ id, name: 'eve' }), headers: { 'content-type': 'application/merge-patch+json; charset=utf-8' } })).status, 201)
+  })
+
+  test('a body over bodyLimit gets 413, with or without Content-Length', async () => {
+    const app = await createApp({ modules: [users], bodyLimit: 64 })
+    const big = JSON.stringify({ id, name: 'x'.repeat(100) })
+    const res = await post(app, { body: big, headers: { 'content-type': 'application/json' } })
+    assert.equal(res.status, 413)
+    const stream = new ReadableStream({ start: (c) => (c.enqueue(new TextEncoder().encode(big)), c.close()) })
+    const chunked = await post(app, { body: stream, headers: { 'content-type': 'application/json' }, duplex: 'half' } as RequestInit)
+    assert.equal(chunked.status, 413)
+  })
+
+  test('invalid JSON gets 400', async () => {
+    const app = await createApp({ modules: [users] })
+    const res = await post(app, { body: '{oops', headers: { 'content-type': 'application/json' } })
+    assert.equal(res.status, 400)
+    assert.deepEqual(await res.json(), { error: 'bad_request', message: 'request body is not valid JSON' })
+  })
+})
+
+describe('errors', () => {
+  test('HttpError refuses non-error statuses at the throw site', () => {
+    assert.throws(() => new HttpError(204, 'nope'), RangeError)
+    assert.equal(new HttpError(418, 'teapot').code, 'http_418')
+    assert.equal(new HttpError(409, 'taken', undefined, 'email_taken').code, 'email_taken')
   })
 })
 

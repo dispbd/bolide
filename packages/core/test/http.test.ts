@@ -170,4 +170,14 @@ describe('node', () => {
       await server.close()
     }
   })
+
+  test('listen() rejects when the port is taken', async () => {
+    const app = await createApp({ modules: [users] })
+    const first = await listen(app, { port: 0, handleSignals: false })
+    try {
+      await assert.rejects(listen(app, { port: first.port, handleSignals: false }), /EADDRINUSE/)
+    } finally {
+      await first.close()
+    }
+  })
 })

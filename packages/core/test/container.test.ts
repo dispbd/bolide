@@ -185,4 +185,21 @@ describe('overrides', () => {
     await c.start()
     assert.equal(c.get(Users).find('1'), 'bob')
   })
+
+  test('a singleton override cannot inject a request-scoped service', () => {
+    const Ctx = defineService({ name: 'Ctx', scope: 'request', factory: () => ({ id: 1 }) })
+    const CtxDb = defineService({ name: 'CtxDb', inject: { ctx: Ctx }, factory: ({ ctx }) => ({ rows: new Map([['1', String(ctx.id)]]) }) })
+    assert.throws(
+      () => new Container({ modules: [defineModule({ name: 'app', providers: [Ctx, Db, Users] })], overrides: [override(Db, { useService: CtxDb })] }),
+      (e: unknown) => e instanceof DependencyError && /singleton "Db" \(overridden by "CtxDb"\) cannot inject request-scoped "Ctx"/.test(e.message),
+    )
+  })
+
+  test('overriding a dependency with a request-scoped service fails at boot', () => {
+    const ReqDb = defineService({ name: 'ReqDb', scope: 'request', factory: () => ({ rows: new Map<string, string>() }) })
+    assert.throws(
+      () => new Container({ modules: [defineModule({ name: 'app', providers: [Db, Users] })], overrides: [override(Db, { useService: ReqDb })] }),
+      /singleton "Users" cannot inject request-scoped "Db"/,
+    )
+  })
 })

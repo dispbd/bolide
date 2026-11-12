@@ -73,17 +73,21 @@ export class Container {
   /** Throws unless every dependency of `consumer` is visible from module `m`. */
   checkDeps(m: Module, consumer: { name: string; inject: Record<string, AnyService>; scope?: string }, what = 'service') {
     const effective = this.effective(consumer as AnyService)
-    if (effective !== consumer) return // an override's own deps are its business
-    for (const dep of Object.values(consumer.inject)) {
-      if (!this.visible.get(m)!.has(dep)) {
+    // An override's deps are not checked for visibility (it may come from anywhere),
+    // but a singleton reaching a request-scoped service is a mistake either way.
+    const overridden = effective !== consumer
+    const scope = overridden ? effective.scope : consumer.scope
+    for (const dep of Object.values(overridden ? depsOf(effective) : consumer.inject)) {
+      if (!overridden && !this.visible.get(m)!.has(dep)) {
         const where = this.owner.get(dep)
         const hint = where
           ? `"${where.name}" provides it; import that module and make sure it exports "${dep.name}".`
           : `no module provides it; add it to the providers of "${m.name}" or of a module it imports.`
         throw new DependencyError(`${what} "${consumer.name}" in module "${m.name}" injects "${dep.name}", which is not visible: ${hint}`)
       }
-      if (consumer.scope === 'singleton' && this.effective(dep).scope === 'request') {
-        throw new DependencyError(`singleton "${consumer.name}" cannot inject request-scoped "${dep.name}". Make "${consumer.name}" request-scoped too.`)
+      if (scope === 'singleton' && this.effective(dep).scope === 'request') {
+        const by = overridden ? `"${consumer.name}" (overridden by "${effective.name}")` : `"${consumer.name}"`
+        throw new DependencyError(`singleton ${by} cannot inject request-scoped "${dep.name}". Make it request-scoped too.`)
       }
     }
   }
@@ -150,7 +154,11 @@ export class Container {
   private async instantiate(s: AnyService, path: AnyService[]): Promise<unknown> {
     if (this.singletons.has(s)) return this.singletons.get(s)
     const eff = this.effective(s)
-    if (eff.scope === 'request') return undefined
+    if (eff.scope === 'request') {
+      // checkDeps should have caught this at construction; never hand a singleton `undefined`.
+      if (path.length) throw new DependencyError(`singleton "${path.at(-1)!.name}" cannot inject request-scoped "${s.name}".`)
+      return undefined
+    }
     const deps: Record<string, unknown> = {}
     for (const [key, dep] of Object.entries(depsOf(eff))) deps[key] = await this.instantiate(dep, [...path, s])
     const instance = await eff.factory(deps as never)

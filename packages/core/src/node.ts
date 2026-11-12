@@ -10,8 +10,9 @@ export interface ListenOptions {
 
 /** Serves an app on Node.js. Other runtimes use `app.fetch` directly. */
 export function listen(app: App, options: ListenOptions = {}) {
-  return new Promise<{ port: number; close(): Promise<void> }>((resolve) => {
+  return new Promise<{ port: number; close(): Promise<void> }>((resolve, reject) => {
     const server = serve({ fetch: app.fetch, port: options.port ?? 3000, hostname: options.hostname }, (info) => {
+      server.off('error', reject)
       let closing: Promise<void> | undefined
       const close = () =>
         (closing ??= new Promise<void>((done) => server.close(() => done())).then(() => app.close()))
@@ -20,5 +21,7 @@ export function listen(app: App, options: ListenOptions = {}) {
       }
       resolve({ port: info.port, close })
     })
+    // e.g. EADDRINUSE: fail the startup instead of leaving the promise pending forever
+    server.once('error', reject)
   })
 }

@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -18,6 +18,7 @@ p.dependencies['@bolide/core'] = tgz('core')
 p.devDependencies['@bolide/cli'] = tgz('cli')
 p.dependencies['@bolide/cache'] = tgz('cache')
 p.dependencies['@bolide/queue'] = tgz('queue')
+p.dependencies['@bolide/auth'] = tgz('auth')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
@@ -58,6 +59,9 @@ await q.get(Queue).enqueue(Ping)
 await q.get(Queue).idle()
 await q.close()
 if (ran !== 1) process.exit(1)
+const { authModule, hashPassword, Sessions, verifyPassword } = await import('@bolide/auth')
+if (!(await verifyPassword('pw', await hashPassword('pw', { cost: 1024 })))) process.exit(1)
+await createApp({ modules: [authModule()], use: [Sessions], logger: createLogger({ level: 'error' }) })
 "
 npm test --silent
 

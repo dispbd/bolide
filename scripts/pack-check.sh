@@ -7,7 +7,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$root"
 npm run build --silent
-npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail -w @bolide/storage -w @bolide/i18n --pack-destination "$work" --silent >/dev/null
+npm pack -w @bolide/core -w @bolide/cli -w @bolide/cache -w @bolide/queue -w @bolide/auth -w @bolide/mail -w @bolide/storage -w @bolide/i18n -w @bolide/data --pack-destination "$work" --silent >/dev/null
 node packages/cli/bin/bolide.mjs create "$work/app" >/dev/null
 cd "$work/app"
 node -e "
@@ -22,6 +22,7 @@ p.dependencies['@bolide/auth'] = tgz('auth')
 p.dependencies['@bolide/mail'] = tgz('mail')
 p.dependencies['@bolide/storage'] = tgz('storage')
 p.dependencies['@bolide/i18n'] = tgz('i18n')
+p.dependencies['@bolide/data'] = tgz('data')
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2))
 "
 npm install --silent
@@ -50,6 +51,11 @@ defineService({ name: 'z', inject: { queue: Queue }, factory: async ({ queue }) 
   // @ts-expect-error Ping takes no payload
   await queue.enqueue(Ping, { x: 1 })
 } })
+import { defineTable, t, type Row } from '@bolide/data'
+const notes = defineTable('notes', { id: t.uuid().primaryKey(), body: t.text().nullable() })
+export const note: Row<typeof notes> = { id: '', body: null }
+// @ts-expect-error body is a string or null
+export const bad: Row<typeof notes> = { id: '', body: 1 }
 TS
 npm run typecheck --silent
 rm src/types-check.ts
@@ -78,6 +84,9 @@ await mq.get(Queue).enqueue(SendMail, { to: 'c@d.co', subject: 's', text: 't' })
 await mq.get(Queue).idle()
 await mq.close()
 if (transport.sent.length !== 1) process.exit(1)
+const { defineTable, t } = await import('@bolide/data')
+const { schemaSql } = await import('@bolide/data/server')
+if (!schemaSql([defineTable('notes', { id: t.uuid().primaryKey() })]).includes('create table \"notes\"')) process.exit(1)
 const { Storage, storageModule } = await import('@bolide/storage')
 const st = await createApp({ modules: [storageModule()], logger: createLogger({ level: 'error' }) })
 await st.get(Storage).put('a/b.txt', 'hi')

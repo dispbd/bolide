@@ -42,6 +42,7 @@ describe('parseCron', () => {
     assert.throws(() => parseCron('*/0 * * * *'), /bad step/)
     assert.throws(() => parseCron('0 0 10-5 * *'), /runs backwards/)
     assert.throws(() => parseCron('0 0 30 feb *'), /never occurs/)
+    assert.equal(next('0 0 30 2 mon', '2027-01-01T00:00:00Z'), '2027-02-01T00:00:00.000Z', 'day of month OR day of week')
     assert.throws(() => parseCron('? * * * *'), /only allowed in the day fields/)
   })
 })

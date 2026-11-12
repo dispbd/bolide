@@ -55,7 +55,8 @@ export function parseCron(expression: string): Cron {
     if (dowAny) return a
     return a || b
   }
-  if (![...dom].some((d) => [...monthsSet].some((m) => d <= daysIn(m)))) fail('the day of month never occurs in the given months')
+  // With a day of week as well, the two are OR-ed and the job still runs on those weekdays.
+  if (dowAny && ![...dom].some((d) => [...monthsSet].some((m) => d <= daysIn(m)))) fail('the day of month never occurs in the given months')
 
   return {
     source,

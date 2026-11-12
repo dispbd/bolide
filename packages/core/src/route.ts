@@ -19,7 +19,15 @@ export interface RouteContext<P extends Maybe, Q extends Maybe, B extends Maybe>
   request: Request
 }
 
-export interface Route<D extends Deps = Deps, P extends Maybe = Maybe, Q extends Maybe = Maybe, B extends Maybe = Maybe> {
+/** What a handler may return: with a `response` schema, values must match it. */
+export type HandlerResult<R extends Maybe> = R extends StandardSchemaV1
+  ? StandardSchemaV1.InferInput<R> | Response | Promise<StandardSchemaV1.InferInput<R> | Response>
+  : unknown
+
+/** Status sent for a plain value returned by the handler. */
+export type SuccessStatus = 200 | 201 | 202
+
+export interface Route<D extends Deps = Deps, P extends Maybe = Maybe, Q extends Maybe = Maybe, B extends Maybe = Maybe, R extends Maybe = Maybe> {
   readonly kind: 'route'
   readonly method: Method
   readonly path: string
@@ -27,15 +35,29 @@ export interface Route<D extends Deps = Deps, P extends Maybe = Maybe, Q extends
   readonly params: P
   readonly query: Q
   readonly body: B
-  readonly summary?: string
+  readonly response: R
+  readonly status: SuccessStatus
+  readonly docs: RouteDocs
   // Method syntax keeps routes assignable to AnyRoute.
-  handler(ctx: RouteContext<P, Q, B>, deps: Resolved<D>): unknown
+  handler(ctx: RouteContext<P, Q, B>, deps: Resolved<D>): HandlerResult<R>
 }
 
 /** Any route, for lists of routes with different types. */
-export type AnyRoute = Route<any, any, any, any>
+export type AnyRoute = Route<any, any, any, any, any>
 
-export interface RouteOptions<D extends Deps, P extends Maybe, Q extends Maybe, B extends Maybe> {
+/** Extra OpenAPI fields for a route. */
+export interface RouteDocs {
+  /** One line for docs and OpenAPI. */
+  summary?: string
+  description?: string
+  /** Defaults to the module name. */
+  tags?: string[]
+  /** Defaults to the method plus the path, e.g. `getUsersById`. */
+  operationId?: string
+  deprecated?: boolean
+}
+
+export interface RouteOptions<D extends Deps, P extends Maybe, Q extends Maybe, B extends Maybe, R extends Maybe> extends RouteDocs {
   method: Method
   /** Hono-style path, e.g. `/users/:id`. Prefixed by the module's `prefix`. */
   path: string
@@ -43,13 +65,18 @@ export interface RouteOptions<D extends Deps, P extends Maybe, Q extends Maybe, 
   params?: P
   query?: Q
   body?: B
-  /** One line for docs and OpenAPI. */
-  summary?: string
   /**
-   * Return a plain value to send it as JSON (200), `undefined` for 204,
-   * or a `Response` for full control. Throw `HttpError` for other statuses.
+   * Schema of the JSON a plain return value becomes. Used for OpenAPI and to type the
+   * handler's return value; it is not checked at runtime.
    */
-  handler: (ctx: RouteContext<P, Q, B>, deps: Resolved<D>) => unknown
+  response?: R
+  /** Status for a plain return value. Default 200. */
+  status?: SuccessStatus
+  /**
+   * Return a plain value to send it as JSON (`status`, default 200), `undefined` for 204,
+   * or a `Response` for full control. Throw `HttpError` for error statuses.
+   */
+  handler: (ctx: RouteContext<P, Q, B>, deps: Resolved<D>) => HandlerResult<R>
 }
 
 /**
@@ -63,9 +90,13 @@ export interface RouteOptions<D extends Deps, P extends Maybe, Q extends Maybe, 
  * })
  * ```
  */
-export function defineRoute<D extends Deps = {}, P extends Maybe = undefined, Q extends Maybe = undefined, B extends Maybe = undefined>(
-  options: RouteOptions<D, P, Q, B>,
-): Route<D, P, Q, B> {
+export function defineRoute<
+  D extends Deps = {},
+  P extends Maybe = undefined,
+  Q extends Maybe = undefined,
+  B extends Maybe = undefined,
+  R extends Maybe = undefined,
+>(options: RouteOptions<D, P, Q, B, R>): Route<D, P, Q, B, R> {
   return {
     kind: 'route',
     method: options.method,
@@ -74,7 +105,15 @@ export function defineRoute<D extends Deps = {}, P extends Maybe = undefined, Q 
     params: options.params as P,
     query: options.query as Q,
     body: options.body as B,
-    summary: options.summary,
+    response: options.response as R,
+    status: options.status ?? 200,
+    docs: {
+      summary: options.summary,
+      description: options.description,
+      tags: options.tags,
+      operationId: options.operationId,
+      deprecated: options.deprecated,
+    },
     handler: options.handler,
   }
 }

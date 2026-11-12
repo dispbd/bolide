@@ -1,6 +1,6 @@
 # @bolide/core
 
-Modules, dependency injection, routes and typed config on Web standards. About 10 KB gzipped, including Hono.
+Modules, dependency injection, routes and typed config on Web standards. About 12 KB gzipped, including Hono.
 
 ```ts
 import { z } from 'zod'
@@ -30,7 +30,7 @@ const getUser = defineRoute({
 
 const users = defineModule({ name: 'users', prefix: '/users', providers: [DbConfig, Users], routes: [getUser] })
 
-const app = await createApp({ modules: [users] })
+const app = await createApp({ modules: [users], openapi: { info: { title: 'Users API', version: '1.0.0' } } })
 await listen(app, { port: 3000 })
 ```
 
@@ -42,6 +42,14 @@ await listen(app, { port: 3000 })
 - **Any Standard Schema library** validates params, query, body and config: zod, zod/mini, Valibot, ArkType.
 - **Runs anywhere `fetch` does.** `app.fetch` is a standard handler; `@bolide/core/node` adds `listen()` with graceful shutdown.
 - **Testable.** `createApp({ overrides: [override(Db, { useValue: fake })], env: {...} })`.
+
+## OpenAPI
+
+`createApp({ openapi: { info } })` serves an OpenAPI 3.1 document at `/openapi.json` (change it with `openapi.path`). `openApiDocument(app.routes, { info })` builds the same document without serving it, e.g. for a build step.
+
+Everything comes from the routes: path params, query, body, and the success response when a route has a `response` schema. A `response` schema also types the handler's return value. Use `summary`, `description`, `tags` (default: the module name), `operationId` (default: method plus path, e.g. `getUsersById`) and `deprecated` for the rest. Error responses (400, 413, 415 and the shared error shape) are added where they apply.
+
+Schemas are converted through the Standard JSON Schema extension (`~standard.jsonSchema`), which zod 4.2+ and ArkType implement. A schema from a library without it still validates; the document just shows `{}` for it.
 
 ## Scopes and lifecycle
 

@@ -52,6 +52,34 @@ defineRoute({
   },
 })
 
+// With a response schema, plain return values must match it; a Response is always fine.
+defineRoute({
+  method: 'GET',
+  path: '/typed',
+  response: z.object({ id: z.string() }),
+  handler: () => ({ id: 'a' }),
+})
+defineRoute({
+  method: 'GET',
+  path: '/typed-async',
+  response: z.object({ id: z.string() }),
+  handler: async () => new Response('raw'),
+})
+defineRoute({
+  method: 'GET',
+  path: '/typed-bad',
+  response: z.object({ id: z.string() }),
+  // @ts-expect-error id must be a string
+  handler: () => ({ id: 1 }),
+})
+defineRoute({
+  method: 'POST',
+  path: '/created',
+  // @ts-expect-error only 200, 201 and 202 are success statuses for plain values
+  status: 204,
+  handler: () => 1,
+})
+
 // Without a body schema the body is not read, so it is typed as undefined.
 defineRoute({
   method: 'POST',

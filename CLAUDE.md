@@ -6,6 +6,7 @@ An experimental Node.js/TypeScript framework: the structure of Nest.js, the buil
 
 - Everything in the repository is in English: code, comments, docs, commit messages, PRs.
 - Branches: one `phase-N` branch per roadmap phase; heavy sub-tasks of a phase go in `phase-N-<task>` and merge into the phase branch with `--no-ff`. A finished phase is merged into `main` through a pull request.
+- Mark AI-written work (`Co-Authored-By: Claude` in commits, a "Generated with Claude Code" line in PRs), but don't add claude.ai session links to commits or PR descriptions.
 - Match the surrounding code: small modules, comments only where they explain why, no new dependencies without a reason in the PR.
 
 ## Principles (packages/core)

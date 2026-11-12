@@ -2,6 +2,7 @@ import { AppEnv, processEnv, type Env } from './config.ts'
 import { Container, type Override } from './container.ts'
 import { buildHttp, CurrentRequest, type ErrorReporter, type RouteInfo } from './http.ts'
 import { BolideError } from './errors.ts'
+import type { Use } from './middleware.ts'
 import type { Module } from './module.ts'
 import { openApiDocument, type OpenApiOptions } from './openapi.ts'
 import type { AnyService, InstanceOf } from './service.ts'
@@ -18,6 +19,8 @@ export interface AppOptions {
   bodyLimit?: number
   /** Serve an OpenAPI 3.1 document built from the routes (at `/openapi.json` by default). */
   openapi?: OpenApiOptions
+  /** App-wide middleware and guards, outermost first. They run for every request, including 404s. */
+  use?: readonly Use[]
 }
 
 export interface App {
@@ -44,11 +47,17 @@ export async function createApp(options: AppOptions): Promise<App> {
   if (!(bodyLimit === Infinity || (Number.isInteger(bodyLimit) && bodyLimit >= 0))) {
     throw new BolideError(`bodyLimit must be a non-negative integer (bytes) or Infinity, got ${bodyLimit}.`)
   }
-  const http = buildHttp(container, container.modules, onError, { bodyLimit })
-  const docs = options.openapi && serveOpenApi(http.routes, options.openapi)
+  const use = options.use ?? []
+  for (const u of use) container.checkRootDeps(u)
+  const openapi = options.openapi
+  const http = buildHttp(container, container.modules, onError, {
+    bodyLimit,
+    use,
+    prelude: openapi && ((routes) => serveOpenApi(routes, openapi)),
+  })
   await container.start()
   return {
-    fetch: async (request) => docs?.(request) ?? http.fetch(request),
+    fetch: (request) => http.fetch(request),
     get: (service) => container.get(service),
     routes: http.routes,
     close: () => container.stop(),

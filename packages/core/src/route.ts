@@ -1,3 +1,4 @@
+import type { Use } from './middleware.ts'
 import type { Infer, StandardSchemaV1 } from './schema.ts'
 import type { Deps, Resolved } from './service.ts'
 
@@ -38,6 +39,7 @@ export interface Route<D extends Deps = Deps, P extends Maybe = Maybe, Q extends
   readonly response: R
   readonly status: SuccessStatus
   readonly docs: RouteDocs
+  readonly use: readonly Use[]
   // Method syntax keeps routes assignable to AnyRoute.
   handler(ctx: RouteContext<P, Q, B>, deps: Resolved<D>): HandlerResult<R>
 }
@@ -72,6 +74,8 @@ export interface RouteOptions<D extends Deps, P extends Maybe, Q extends Maybe, 
   response?: R
   /** Status for a plain return value. Default 200. */
   status?: SuccessStatus
+  /** Middleware and guards for this route only; they run after the module's. */
+  use?: readonly Use[]
   /**
    * Return a plain value to send it as JSON (`status`, default 200), `undefined` for 204,
    * or a `Response` for full control. Throw `HttpError` for error statuses.
@@ -107,6 +111,7 @@ export function defineRoute<
     body: options.body as B,
     response: options.response as R,
     status: options.status ?? 200,
+    use: options.use ?? [],
     docs: {
       summary: options.summary,
       description: options.description,

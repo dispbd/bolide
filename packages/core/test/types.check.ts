@@ -143,3 +143,26 @@ const beta: boolean = flags.beta
 void beta
 // @ts-expect-error unknown flag
 flags.gamma
+
+// Middleware and guards get typed deps from inject.
+import { defineGuard, defineMiddleware } from '../src/middleware.ts'
+defineMiddleware({
+  name: 'mw',
+  inject: { users: Users },
+  handle: async (_ctx, next, deps) => {
+    deps.users.count()
+    // @ts-expect-error not injected
+    deps.db
+    return next()
+  },
+})
+defineGuard({
+  name: 'g',
+  inject: { users: Users },
+  check: (_ctx, { users }) => users.count() > 0,
+})
+defineMiddleware({
+  name: 'bad',
+  // @ts-expect-error middleware must return a Response
+  handle: () => 'nope',
+})

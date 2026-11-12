@@ -1,3 +1,4 @@
+import type { Use } from './middleware.ts'
 import type { AnyRoute } from './route.ts'
 import type { AnyService } from './service.ts'
 
@@ -13,6 +14,8 @@ export interface Module {
   readonly routes: readonly AnyRoute[]
   /** Prepended to the paths of this module's own routes. */
   readonly prefix: string
+  /** Middleware and guards for this module's own routes, outermost first. */
+  readonly use: readonly Use[]
 }
 
 export interface ModuleOptions {
@@ -23,6 +26,7 @@ export interface ModuleOptions {
   global?: boolean
   routes?: readonly AnyRoute[]
   prefix?: string
+  use?: readonly Use[]
 }
 
 /**
@@ -39,5 +43,6 @@ export function defineModule(options: ModuleOptions): Module {
     global: options.global ?? false,
     routes: options.routes ?? [],
     prefix: options.prefix ?? '',
+    use: options.use ?? [],
   }
 }

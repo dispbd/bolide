@@ -1,6 +1,6 @@
 # @bolide/core
 
-Modules, dependency injection, routes and typed config on Web standards. About 12 KB gzipped, including Hono.
+Modules, dependency injection, routes and typed config on Web standards. About 13 KB gzipped, including Hono.
 
 ```ts
 import { z } from 'zod'
@@ -42,6 +42,35 @@ await listen(app, { port: 3000 })
 - **Any Standard Schema library** validates params, query, body and config: zod, zod/mini, Valibot, ArkType.
 - **Runs anywhere `fetch` does.** `app.fetch` is a standard handler; `@bolide/core/node` adds `listen()` with graceful shutdown.
 - **Testable.** `createApp({ overrides: [override(Db, { useValue: fake })], env: {...} })`.
+
+## Middleware and guards
+
+```ts
+const timing = defineMiddleware({
+  name: 'timing',
+  handle: async (_ctx, next) => {
+    const start = performance.now()
+    const res = await next()
+    res.headers.set('server-timing', `app;dur=${(performance.now() - start).toFixed(1)}`)
+    return res
+  },
+})
+
+const signedIn = defineGuard({
+  name: 'signedIn',
+  inject: { session: Session }, // request-scoped services and CurrentRequest work here
+  check: (_ctx, { session }) => {
+    if (!session.user) throw new HttpError(401, 'sign in first')
+    return true // false sends 403
+  },
+})
+
+createApp({ modules, use: [timing] })            // every request, 404s and /openapi.json included
+defineModule({ name: 'admin', use: [signedIn] }) // this module's routes
+defineRoute({ ..., use: [rateLimit] })           // one route
+```
+
+They run app → module → route, outermost first, all before input is parsed. Handler errors are already responses by the time middleware sees them, so a logger can read `res.status`. Deps come from the request scope and are checked at boot: module and route middleware see what their module sees; app middleware sees built-ins, global modules and the exports of the modules passed to `createApp`.
 
 ## OpenAPI
 

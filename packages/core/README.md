@@ -97,6 +97,12 @@ const Users = defineService({ name: 'Users', inject: { log: Log }, factory: ({ l
 - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`) and `LOG_FORMAT` (`json` or `pretty`; default `json` when `NODE_ENV=production`, otherwise `pretty`) come from the app env and are checked at boot.
 - `createApp({ logger: createLogger({ write }) })` collects records in tests; `override(Log, { useValue })` works too. Errors in fields are logged with their stack and `cause`.
 
+## Bindings
+
+A module can provide a token with another implementation: `providers: [bind(Store, { useValue: memoryStore() })]` or `bind(Store, { useService: RedisStore })`. Everyone still injects `Store`. Unlike `override` (an app-level replacement, usually in tests), a binding's dependencies must be visible from its module, and an app override still beats it. Batteries use bindings to let you choose a driver.
+
+`Duration` (`250`, `'30s'`, `'5m'`, `'1h'`, `'7d'`) and `toMs()` are shared by the batteries for TTLs, delays and timeouts.
+
 ## Scopes and lifecycle
 
 - `singleton` (default): created at boot in dependency order; `onInit` after its deps, `onDestroy` in reverse order on `app.close()`.

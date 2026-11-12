@@ -6,6 +6,7 @@ import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { create, run } from '../src/index.ts'
+import { packageFields } from '../src/template.ts'
 
 // Inside the repo, so generated projects resolve @bolide/core, zod and tsx from the workspace.
 const tmp = fileURLToPath(new URL('./.tmp/', import.meta.url))
@@ -53,7 +54,10 @@ describe('bolide create', () => {
     assert.equal(await run(['create', dir, '--force'], out.log), 0)
     assert.equal(await readFile(join(dir, 'package.json'), 'utf8'), '{"name":"mine"}')
     assert.match(out.text(), /Kept existing files: .*package\.json/)
-    assert.match(out.text(), /Your package.json was kept. Add to it:[\s\S]*"@bolide\/core"[\s\S]*"dev": "bolide dev"/)
+    // The hint is the same set of fields a generated package.json gets.
+    const hint = JSON.parse(out.text().split('Merge these fields into it:\n')[1]!.split('\nCreated')[0]!)
+    const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+    assert.deepEqual(hint, packageFields({ core: `^${version}`, cli: `^${version}` }))
   })
 
   test('pins published versions to the CLI version by default', async () => {

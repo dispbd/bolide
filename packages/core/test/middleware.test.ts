@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
+import { mutable } from '../src/http.ts'
 import {
   createApp,
   CurrentRequest,
@@ -65,6 +66,17 @@ describe('middleware', () => {
     assert.equal(res.status, 302)
     assert.equal(res.headers.get('location'), 'http://example.com/')
     assert.equal(res.headers.get('x-tag'), '1')
+  })
+
+  test('upgrade responses and read bodies are not copied', async () => {
+    const upgrade = new Response(null)
+    Object.defineProperty(upgrade, 'status', { value: 101 })
+    assert.equal(mutable(upgrade), upgrade)
+    const read = new Response('x')
+    await read.text()
+    assert.equal(mutable(read), read)
+    const plain = new Response('x')
+    assert.notEqual(mutable(plain), plain)
   })
 
   test('middleware can answer without calling next()', async () => {

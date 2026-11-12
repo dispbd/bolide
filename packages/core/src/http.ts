@@ -190,9 +190,16 @@ async function readText(request: Request, limit: number) {
   return new TextDecoder().decode(bytes)
 }
 
+/**
+ * Response.redirect() and fetch() results have immutable headers; a copy lets middleware set them.
+ * Upgrades (101) and responses whose body was read can't be rebuilt, so they pass through as is.
+ */
+export function mutable(res: Response): Response {
+  return res.status >= 200 && !res.bodyUsed ? new Response(res.body, res) : res
+}
+
 function toResponse(result: unknown, status: number): Response {
-  // Response.redirect() and fetch() results have immutable headers; a copy lets middleware set them.
-  if (result instanceof Response) return new Response(result.body, result)
+  if (result instanceof Response) return mutable(result)
   if (result === undefined) return new Response(null, { status: 204 })
   return Response.json(result, { status })
 }

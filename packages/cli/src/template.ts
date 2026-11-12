@@ -7,31 +7,33 @@ export interface TemplateOptions {
 
 const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n'
 
+/** The package.json fields a Bolide project needs; also printed when `--force` keeps an existing one. */
+export function packageFields({ core, cli }: Pick<TemplateOptions, 'core' | 'cli'>) {
+  return {
+    scripts: {
+      dev: 'bolide dev',
+      start: 'tsx src/main.ts',
+      test: 'tsx --test test/*.test.ts',
+      typecheck: 'tsc --noEmit',
+    },
+    dependencies: {
+      '@bolide/core': core,
+      '@hono/node-server': '^2.1.5',
+      zod: '^4.6.7',
+    },
+    devDependencies: {
+      '@bolide/cli': cli,
+      '@types/node': '^22.20.5',
+      tsx: '^4.23.15',
+      typescript: '^5.9.0',
+    },
+  }
+}
+
 /** Every file of a new project, by relative path. */
 export function template({ name, core, cli }: TemplateOptions): Record<string, string> {
   return {
-    'package.json': json({
-      name,
-      private: true,
-      type: 'module',
-      scripts: {
-        dev: 'bolide dev',
-        start: 'tsx src/main.ts',
-        test: 'tsx --test test/*.test.ts',
-        typecheck: 'tsc --noEmit',
-      },
-      dependencies: {
-        '@bolide/core': core,
-        '@hono/node-server': '^2.1.5',
-        zod: '^4.6.7',
-      },
-      devDependencies: {
-        '@bolide/cli': cli,
-        '@types/node': '^22.20.5',
-        tsx: '^4.23.15',
-        typescript: '^5.9.0',
-      },
-    }),
+    'package.json': json({ name, private: true, type: 'module', ...packageFields({ core, cli }) }),
 
     'tsconfig.json': json({
       compilerOptions: {

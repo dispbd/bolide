@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { CliError } from './errors.ts'
-import { template } from './template.ts'
+import { packageFields, template } from './template.ts'
 
 export interface CreateOptions {
   dir: string
@@ -48,7 +48,7 @@ export async function create(options: CreateOptions) {
     await writeFile(target, content)
     written.push(path)
   }
-  return { dir, name, files: written, kept, deps: { core: link('core'), cli: link('cli') } }
+  return { dir, name, files: written, kept, packageFields: packageFields({ core: link('core'), cli: link('cli') }) }
 }
 
 /** npm package names are lowercase and URL-safe. */

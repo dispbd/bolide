@@ -12,7 +12,7 @@ Goal (from the [roadmap](../roadmap.md)): router on Web standards, `defineModule
 | Typed config | `phase-1` | `defineConfig` with any Standard Schema, `AppEnv`, every problem listed at boot. |
 | OpenAPI | `phase-1-openapi` | OpenAPI 3.1 from route schemas through Standard JSON Schema; served by `createApp({ openapi })`. Routes gain `response` (types the return value), `status` and doc fields. |
 
-Size: `@bolide/core` with Hono is 31.6 KB minified, 12.4 KB gzipped (OpenAPI added about 2 KB gzipped). 57 tests plus compile-time type checks.
+Size: `@bolide/core` with Hono is 31.6 KB minified, 12.4 KB gzipped (OpenAPI added about 2 KB gzipped). 66 tests plus compile-time type checks.
 
 ## Review fixes (PR #3)
 

@@ -92,4 +92,51 @@ describe('openapi', () => {
     const doc = openApiDocument(app.routes, { info }) as any
     assert.deepEqual(doc.paths['/x'].post.requestBody.content['application/json'].schema, {})
   })
+
+  test('responses are documented as sent: defaults stay optional', async () => {
+    const m = defineModule({
+      name: 'm',
+      routes: [defineRoute({ method: 'GET', path: '/page', response: z.object({ page: z.number().default(1) }), handler: () => ({}) })],
+    })
+    const doc = openApiDocument((await createApp({ modules: [m] })).routes, { info }) as any
+    const schema = doc.paths['/page'].get.responses['200'].content['application/json'].schema
+    assert.ok(!(schema.required ?? []).includes('page'))
+  })
+
+  test('a schema that cannot become JSON Schema names the route', async () => {
+    const m = defineModule({ name: 'm', routes: [defineRoute({ method: 'POST', path: '/d', body: z.object({ at: z.date() }), handler: () => 1 })] })
+    const app = await createApp({ modules: [m] })
+    assert.throws(() => openApiDocument(app.routes, { info }), (e) => e instanceof BolideError && /body of POST \/d/.test(e.message))
+  })
+
+  test('duplicate operationIds fail', async () => {
+    const m = defineModule({
+      name: 'm',
+      routes: [
+        defineRoute({ method: 'GET', path: '/users-list', handler: () => 1 }),
+        defineRoute({ method: 'GET', path: '/users/list', handler: () => 2 }),
+      ],
+    })
+    const app = await createApp({ modules: [m] })
+    assert.throws(() => openApiDocument(app.routes, { info }), /both have operationId "getUsersList"/)
+  })
+
+  test('optional bodies are not required; body routes document both 400 shapes', async () => {
+    const m = defineModule({
+      name: 'm',
+      routes: [defineRoute({ method: 'POST', path: '/opt', body: z.object({ a: z.number() }).optional(), handler: () => 1 })],
+    })
+    const doc = openApiDocument((await createApp({ modules: [m] })).routes, { info }) as any
+    const op = doc.paths['/opt'].post
+    assert.equal(op.requestBody.required, false)
+    assert.equal(op.responses['400'].content['application/json'].schema.oneOf.length, 2)
+  })
+
+  test('openapi.path must start with a slash; the document wins over param routes', async () => {
+    await assert.rejects(createApp({ modules: [users], openapi: { info, path: 'openapi.json' } }), /must start with "\/"/)
+    const m = defineModule({ name: 'm', routes: [defineRoute({ method: 'GET', path: '/:slug', handler: () => 'page' })] })
+    const app = await createApp({ modules: [m], openapi: { info } })
+    assert.equal((await (await app.fetch(new Request('http://x/openapi.json'))).json()).openapi, '3.1.0')
+    assert.equal(await (await app.fetch(new Request('http://x/about'))).json(), 'page')
+  })
 })

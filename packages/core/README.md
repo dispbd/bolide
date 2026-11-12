@@ -49,7 +49,7 @@ await listen(app, { port: 3000 })
 
 Everything comes from the routes: path params, query, body, and the success response when a route has a `response` schema. A `response` schema also types the handler's return value. Use `summary`, `description`, `tags` (default: the module name), `operationId` (default: method plus path, e.g. `getUsersById`) and `deprecated` for the rest. Error responses (400, 413, 415 and the shared error shape) are added where they apply.
 
-Schemas are converted through the Standard JSON Schema extension (`~standard.jsonSchema`), which zod 4.2+ and ArkType implement. A schema from a library without it still validates; the document just shows `{}` for it.
+Schemas are converted through the Standard JSON Schema extension (`~standard.jsonSchema`), which zod 4.2+ and ArkType implement. A schema from a library without it still validates; the document just shows `{}` for it. Responses are not parsed at runtime, so they are documented from the schema's input side, which is what the handler is typed against and what is sent. A schema that can't be expressed as JSON Schema (e.g. `z.date()`) fails with the route's name; duplicate `operationId`s fail too. The document path takes precedence over param routes that would also match it.
 
 ## Scopes and lifecycle
 

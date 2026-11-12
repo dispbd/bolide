@@ -55,9 +55,13 @@ export async function createApp(options: AppOptions): Promise<App> {
   }
 }
 
-/** Answers GET requests for the document; everything else falls through to the routes. */
+/**
+ * Answers GET requests for the document before the router runs, so the document path
+ * wins over a param route that would also match it (e.g. `GET /:slug`).
+ */
 function serveOpenApi(routes: readonly RouteInfo[], options: OpenApiOptions) {
   const path = options.path ?? '/openapi.json'
+  if (!path.startsWith('/')) throw new BolideError(`openapi.path must start with "/", got "${path}".`)
   const taken = routes.find((r) => r.method === 'GET' && r.path === path)
   if (taken) throw new BolideError(`openapi.path "${path}" is also a route in module "${taken.module}". Pick another path.`)
   // Built once at boot: routes can't change after createApp.

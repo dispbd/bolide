@@ -1,3 +1,4 @@
+import { BolideError } from './errors.ts'
 import type { RouteInfo } from './http.ts'
 import type { StandardSchemaV1 } from './schema.ts'
 
@@ -5,7 +6,10 @@ import type { StandardSchemaV1 } from './schema.ts'
 export interface OpenApiOptions {
   info: { title: string; version: string; description?: string }
   servers?: { url: string; description?: string }[]
-  /** Serve the document at this path from `createApp`. Default `/openapi.json`. */
+  /**
+   * Serve the document at this path from `createApp`. Default `/openapi.json`.
+   * It takes precedence over param routes that would also match it.
+   */
   path?: string
 }
 
@@ -17,31 +21,47 @@ type Converter = { input(o: { target: string }): JsonSchema; output(o: { target:
  * (`~standard.jsonSchema`, zod 4.2+, ArkType). Libraries without it give `{}`:
  * the endpoint is still listed, its shape just isn't described.
  */
-function toJsonSchema(schema: StandardSchemaV1 | undefined, io: 'input' | 'output'): JsonSchema | undefined {
+function toJsonSchema(schema: StandardSchemaV1 | undefined, where: string): JsonSchema | undefined {
   if (!schema) return undefined
   const converter = (schema['~standard'] as { jsonSchema?: Converter }).jsonSchema
   if (!converter) return {}
-  const { $schema: _, ...rest } = converter[io]({ target: 'draft-2020-12' })
-  return rest
+  // Always the input side: requests are parsed from it, and responses are sent unparsed,
+  // so the handler's return value (typed by InferInput) is exactly what goes over the wire.
+  try {
+    const { $schema: _, ...rest } = converter.input({ target: 'draft-2020-12' })
+    return rest
+  } catch (e) {
+    throw new BolideError(
+      `OpenAPI: the ${where} schema can't be expressed as JSON Schema (${(e as Error).message}). ` +
+        'Use JSON-representable types (e.g. an ISO string instead of a Date), or leave this route out of openApiDocument.',
+    )
+  }
+}
+
+/** True when the schema accepts a missing value, so the body is optional. Async validators count as required. */
+function acceptsUndefined(schema: StandardSchemaV1) {
+  const result = schema['~standard'].validate(undefined)
+  return !(result instanceof Promise) && !result.issues
 }
 
 const errorBody = {
   type: 'object',
   properties: { error: { type: 'string' }, message: { type: 'string' }, details: {} },
-  required: ['error'],
+  required: ['error', 'message'],
 }
 
 const validationBody = {
   type: 'object',
   properties: {
     error: { const: 'validation_failed' },
+    message: { type: 'string' },
     where: { type: 'string', enum: ['params', 'query', 'body'] },
     issues: {
       type: 'array',
       items: { type: 'object', properties: { message: { type: 'string' }, path: { type: 'string' } }, required: ['message', 'path'] },
     },
   },
-  required: ['error', 'where', 'issues'],
+  required: ['error', 'message', 'where', 'issues'],
 }
 
 const json = (schema: JsonSchema) => ({ content: { 'application/json': { schema } } })
@@ -82,16 +102,27 @@ function parameters(where: 'path' | 'query', schema: JsonSchema | undefined, nam
 /** Builds an OpenAPI 3.1 document from the app's routes. */
 export function openApiDocument(routes: readonly RouteInfo[], options: OpenApiOptions) {
   const paths: Record<string, Record<string, unknown>> = {}
+  const ids = new Map<string, string>()
   for (const { method, path, module, route } of routes) {
-    const body = toJsonSchema(route.body, 'input')
-    const params = toJsonSchema(route.params, 'input')
-    const query = toJsonSchema(route.query, 'input')
-    const response = toJsonSchema(route.response, 'output')
+    const name = `${method} ${path}`
+    const body = toJsonSchema(route.body, `body of ${name}`)
+    const params = toJsonSchema(route.params, `params of ${name}`)
+    const query = toJsonSchema(route.query, `query of ${name}`)
+    const response = toJsonSchema(route.response, `response of ${name}`)
+
+    const id = route.docs.operationId ?? operationId(method, path)
+    const other = ids.get(id)
+    if (other) throw new BolideError(`OpenAPI: ${name} and ${other} both have operationId "${id}". Set operationId on one of them.`)
+    ids.set(id, name)
 
     const responses: Record<string, unknown> = {
       [route.status]: { description: 'Success', ...(response ? json(response) : {}) },
     }
-    if (route.params || route.query || route.body) responses['400'] = { description: 'Invalid input', ...json(validationBody) }
+    if (route.params || route.query || route.body) {
+      // A body route can also answer 400 for malformed JSON, with the plain error shape.
+      const invalid = route.body ? { oneOf: [validationBody, errorBody] } : validationBody
+      responses['400'] = { description: 'Invalid input', ...json(invalid) }
+    }
     if (route.body) {
       responses['413'] = { description: 'Body too large', ...json(errorBody) }
       responses['415'] = { description: 'Body is not JSON', ...json(errorBody) }
@@ -100,13 +131,13 @@ export function openApiDocument(routes: readonly RouteInfo[], options: OpenApiOp
 
     const { summary, description, tags, deprecated } = route.docs
     const operation = {
-      operationId: route.docs.operationId ?? operationId(method, path),
+      operationId: id,
       summary,
       description,
       tags: tags ?? [module],
       deprecated,
       parameters: [...parameters('path', params, pathParamNames(path)), ...parameters('query', query, [])],
-      requestBody: body ? { required: true, ...json(body) } : undefined,
+      requestBody: body ? { required: !acceptsUndefined(route.body!), ...json(body) } : undefined,
       responses,
     }
     // Drop undefined fields and empty parameter lists so the document stays readable.

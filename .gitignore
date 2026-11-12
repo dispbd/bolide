@@ -3,3 +3,4 @@ dist/
 .pgdata/
 *.log
 .DS_Store
+packages/cli/test/.tmp/

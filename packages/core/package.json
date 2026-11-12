@@ -1,0 +1,42 @@
+{
+  "name": "@bolide/core",
+  "version": "0.0.0",
+  "description": "Bolide core: modules, dependency injection, routes and config on Web standards",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "bolide-source": "./src/node.ts",
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    }
+  },
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0",
+    "hono": "^4.13.13"
+  },
+  "peerDependencies": {
+    "@hono/node-server": "^2.1.5"
+  },
+  "peerDependenciesMeta": {
+    "@hono/node-server": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

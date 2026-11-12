@@ -14,6 +14,12 @@ An experimental Node.js/TypeScript framework that combines:
 | `phase-N` | Work on phase N of the roadmap, one branch per phase. |
 | `phase-N-<task>` | Heavy sub-tasks of a phase, merged into the phase branch. They use a dash because git does not allow `phase-N/...` next to a `phase-N` branch. |
 
+## Packages
+
+| Package | Status |
+|---|---|
+| [`@bolide/core`](packages/core) | Phase 1, in progress: modules, DI, routes, config. |
+
 ## Roadmap
 
 See [docs/roadmap.md](docs/roadmap.md).

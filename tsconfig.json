@@ -7,8 +7,23 @@
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "lib": ["ES2022", "DOM"],
-    "types": ["node"]
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ],
+    "customConditions": [
+      "bolide-source"
+    ]
   },
-  "include": ["spike"]
+  "include": [
+    "spike",
+    "packages"
+  ],
+  "exclude": [
+    "packages/*/dist",
+    "packages/cli/test/.tmp"
+  ]
 }

@@ -1,0 +1,31 @@
+{
+  "name": "@bolide/cli",
+  "version": "0.0.0",
+  "description": "Bolide command line: create a project, run it in watch mode",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "bolide": "./bin/bolide.mjs"
+  },
+  "exports": {
+    ".": {
+      "bolide-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "tsx": "^4.23.15"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

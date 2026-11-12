@@ -13,10 +13,17 @@
     ],
     "types": [
       "node"
+    ],
+    "customConditions": [
+      "bolide-source"
     ]
   },
   "include": [
     "spike",
     "packages"
+  ],
+  "exclude": [
+    "packages/*/dist",
+    "packages/cli/test/.tmp"
   ]
 }

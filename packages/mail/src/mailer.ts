@@ -39,8 +39,12 @@ export interface Mailer {
   send(message: MailMessage): Promise<{ id?: string }>
 }
 
-// Loose on purpose: real validation is the mail server's job. This catches typos and header injection.
-const address = /^(?:[^<>\r\n]*<[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>|[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+)$/
+// Loose on purpose: real validation is the mail server's job. This catches typos and header injection,
+// including extra recipients smuggled in through a display name (`a@x.io, victim@y.io <a@x.io>`):
+// an unquoted name can't hold `,` `;` `@` `"` or a backslash, a quoted one can't hold `"` or a backslash.
+const mailbox = String.raw`[^\s@<>",;\\]+@[^\s@<>",;\\]+\.[^\s@<>",;\\]+`
+const displayName = String.raw`(?:[^<>",;@\\\r\n]*|\s*"[^"\\\r\n]*"\s*)`
+const address = new RegExp(`^(?:${displayName}<${mailbox}>|${mailbox})$`)
 
 const list = (v: string | readonly string[] | undefined) => (v === undefined ? [] : typeof v === 'string' ? [v] : [...v])
 

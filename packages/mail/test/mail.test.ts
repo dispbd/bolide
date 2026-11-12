@@ -21,11 +21,17 @@ describe('prepareMail', () => {
       [{ ...ok, to: [] }, /no recipients/],
       [{ ...ok, to: 'nobody' }, /to "nobody" is not an email address/],
       [{ ...ok, to: 'a@x.io\r\nBcc: victim@x.io' }, /is not an email address/],
+      [{ ...ok, to: 'a@x.io, victim@y.io <a@x.io>' }, /is not an email address/],
+      [{ ...ok, to: 'victim@y.io;<a@x.io>' }, /is not an email address/],
+      [{ ...ok, cc: '"x" victim@y.io, "y" <a@x.io>' }, /is not an email address/],
+      [{ ...ok, to: '"a\\" , b@y.io" <a@x.io>' }, /is not an email address/],
+      [{ ...ok, to: 'a,b@x.io' }, /is not an email address/],
       [{ ...ok, subject: 'Hi\r\nBcc: victim@x.io' }, /one line/],
       [{ ...ok, text: undefined }, /add text or html/],
       [{ ...ok, headers: { 'X-Ok': 'a\nb' } }, /not a valid one-line header/],
       [{ ...ok, attachments: [{ filename: 'a"b', content: '' }] }, /filename/],
     ]
+    for (const to of ['Ann <a@x.io>', '"Doe, Ann" <a@x.io>', '"ann@x.io" <a@x.io>', ' a@x.io ']) assert.equal(prepareMail({ ...ok, to }).to[0], to)
     for (const [message, error] of cases) assert.throws(() => prepareMail(message as never), (e: Error) => e instanceof BolideError && error.test(e.message), String(error))
   })
 })

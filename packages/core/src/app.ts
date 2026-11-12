@@ -1,3 +1,4 @@
+import { AppEnv, processEnv, type Env } from './config.ts'
 import { Container, type Override } from './container.ts'
 import { buildHttp, CurrentRequest, type ErrorReporter, type RouteInfo } from './http.ts'
 import type { Module } from './module.ts'
@@ -7,6 +8,8 @@ export interface AppOptions {
   modules: readonly Module[]
   /** Replace services, typically in tests. */
   overrides?: readonly Override[]
+  /** Environment for `AppEnv` and configs. Defaults to `process.env` where it exists. */
+  env?: Env
   /** Called for unexpected errors (the client gets a plain 500). Defaults to console.error. */
   onError?: ErrorReporter
 }
@@ -26,8 +29,9 @@ export interface App {
 export async function createApp(options: AppOptions): Promise<App> {
   const container = new Container({
     modules: options.modules,
-    builtins: [CurrentRequest],
-    overrides: options.overrides,
+    builtins: [CurrentRequest, AppEnv],
+    // Later overrides win, so a user override of AppEnv beats `env`.
+    overrides: [{ provide: AppEnv, useValue: options.env ?? processEnv() }, ...(options.overrides ?? [])],
   })
   const onError = options.onError ?? ((e, req) => console.error(`[bolide] ${req.method} ${req.url}`, e))
   const http = buildHttp(container, container.modules, onError)

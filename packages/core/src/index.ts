@@ -6,3 +6,4 @@ export { Container, RequestScope, override, type ContainerOptions, type Override
 export { defineRoute, json, type AnyRoute, type Method, type Route, type RouteContext, type RouteOptions } from './route.ts'
 export { CurrentRequest, type ErrorReporter, type RouteInfo } from './http.ts'
 export { createApp, type App, type AppOptions } from './app.ts'
+export { AppEnv, defineConfig, type ConfigOptions, type Env } from './config.ts'

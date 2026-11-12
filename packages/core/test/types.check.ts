@@ -59,3 +59,12 @@ defineRoute({
   // @ts-expect-error dependency not declared in inject
   handler: (_ctx, { db }) => db,
 })
+
+// Config values are typed from the schema.
+import { defineConfig } from '../src/config.ts'
+const Cfg = defineConfig({ name: 'Cfg', schema: z.object({ port: z.coerce.number() }) })
+const cfg = null as unknown as InstanceOf<typeof Cfg>
+const port: number = cfg.port
+void port
+// @ts-expect-error configs are read-only
+cfg.port = 1

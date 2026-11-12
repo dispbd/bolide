@@ -5,8 +5,8 @@
     "allowImportingTsExtensions": false,
     "rewriteRelativeImportExtensions": true,
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
+    "declarationMap": false,
+    "sourceMap": false,
     "rootDir": "src",
     "outDir": "dist",
     "customConditions": []

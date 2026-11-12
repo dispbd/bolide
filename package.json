@@ -11,6 +11,7 @@
     "bench": "tsx spike/bench/latency.ts",
     "bundle-size": "node spike/bench/bundle-size.mjs",
     "typecheck": "tsc --noEmit",
+    "pretest:core": "npm run build",
     "test:core": "tsx --conditions=bolide-source --test packages/*/test/*.test.ts",
     "build": "npm run build --workspaces",
     "pretest": "npm run build",

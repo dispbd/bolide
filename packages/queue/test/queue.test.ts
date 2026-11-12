@@ -66,18 +66,26 @@ describe('jobs', () => {
     await app.close()
   })
 
-  test('a job past its timeout is aborted and counted as failed', async () => {
+  test('a job past its timeout is aborted and counted as failed, but keeps its slot until it returns', async () => {
     let signal: AbortSignal | undefined
+    let release = () => {}
+    const ran: string[] = []
     const Slow = defineJob({ name: 'slow', retries: 0, timeout: 20, handler: (_p, _d, ctx) => {
       signal = ctx.signal
-      return new Promise(() => {})
+      return new Promise<void>((r) => (release = r))
     } })
+    const Fast = defineJob({ name: 'fast', handler: () => void ran.push('fast') })
     const driver = memoryQueue()
-    const app = await createApp({ modules: [queueModule({ jobs: [Slow], driver })], logger: quiet })
+    const app = await createApp({ modules: [queueModule({ jobs: [Slow, Fast], driver, concurrency: 1 })], logger: quiet })
     await app.get(Queue).enqueue(Slow)
-    await app.get(Queue).idle()
+    await app.get(Queue).enqueue(Fast)
+    await new Promise((r) => setTimeout(r, 80))
     assert.equal(signal!.aborted, true)
     assert.match(driver.messages()[0]!.error!, /timed out after 20ms/)
+    assert.deepEqual(ran, [], 'the slow handler ignores its signal, so its slot is still taken')
+    release()
+    await app.get(Queue).idle()
+    assert.deepEqual(ran, ['fast'])
     await app.close()
   })
 

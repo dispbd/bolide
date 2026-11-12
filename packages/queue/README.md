@@ -36,7 +36,7 @@ await queue.enqueue(SendWelcome, { userId: '42' }, { delay: '10m' })
 - `name` is how stored messages find their handler, so keep it stable across deploys.
 - `schema` (any Standard Schema) validates the payload when it is enqueued (the caller gets a `ValidationError`) and again before it runs. A job without a schema takes no payload.
 - `inject` takes singleton services. They must be visible to the queue module: export them and pass their modules in `imports`, or make those modules global. A mistake fails at boot.
-- `retries` (default 3), `backoff` (a `Duration` or `(attempt) => Duration`; default 1s, 2s, 4s... up to 1h), `timeout` (default 5m; the run is aborted through `ctx.signal` and counts as a failure).
+- `retries` (default 3), `backoff` (a `Duration` or `(attempt) => Duration`; default 1s, 2s, 4s... up to 1h), `timeout` (default 5m; the run is aborted through `ctx.signal` and counts as a failure; pass the signal on, because a handler that ignores it keeps its worker slot until it returns).
 - After the last attempt the message is kept as `dead` with its error. A payload the current schema rejects goes straight to `dead`.
 
 Jobs run at least once: a message is leased while it runs, and if the process dies it becomes due again when the lease ends. Make handlers idempotent, or enqueue with `{ key }`.

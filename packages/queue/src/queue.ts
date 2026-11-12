@@ -155,7 +155,9 @@ interface Settings {
 
 class QueueRuntime implements Queue {
   private readonly names: string[]
-  private readonly running = new Map<string, { done: Promise<void>; abort: AbortController }>()
+  private readonly running = new Set<{ done: Promise<void>; abort: AbortController }>()
+  /** Worker slots: a job keeps its slot until its handler returns, even after a timeout recorded its failure. */
+  private readonly busy = new Set<object>()
   private readonly timers = new Set<ReturnType<typeof setTimeout>>()
   private readonly idleWaiters: (() => void)[] = []
   private pumping = false
@@ -277,7 +279,7 @@ class QueueRuntime implements Queue {
     try {
       do {
         this.again = false
-        while (!this.stopped && this.running.size < this.settings.concurrency) {
+        while (!this.stopped && this.busy.size < this.settings.concurrency) {
           let msg: QueueMessage | undefined
           try {
             msg = await this.driver.reserve(this.names, this.leaseFor())
@@ -309,14 +311,25 @@ class QueueRuntime implements Queue {
   private launch(msg: QueueMessage) {
     const abort = new AbortController()
     const attributes = { 'job.name': msg.job, 'job.id': msg.id, 'job.attempt': msg.attempt }
-    const done = this.tracer.span(`job ${msg.job}`, (span) => this.execute(msg, abort, span), { kind: 'consumer', attributes }).finally(() => {
-      this.running.delete(msg.id)
-      void this.pump()
-    })
-    this.running.set(msg.id, { done, abort })
+    let handler: Promise<unknown> = Promise.resolve()
+    const done = this.tracer
+      .span(`job ${msg.job}`, (span) => this.execute(msg, abort, span, (p) => (handler = p)), { kind: 'consumer', attributes })
+      .finally(() => this.running.delete(run))
+    // Keyed per run, not by message id: a retry without backoff can start before this run is cleaned up.
+    const run = { done, abort }
+    this.running.add(run)
+    this.busy.add(run)
+    // A handler that ignores its signal still holds its slot until it returns, so `concurrency` stays a real limit.
+    void done
+      .catch(() => {})
+      .then(() => handler.catch(() => {}))
+      .then(() => {
+        this.busy.delete(run)
+        void this.pump()
+      })
   }
 
-  private async execute(msg: QueueMessage, abort: AbortController, span: Span) {
+  private async execute(msg: QueueMessage, abort: AbortController, span: Span, track: (run: Promise<unknown>) => void) {
     const job = this.jobs.get(msg.job)!
     const log = this.log.child({ job: msg.job, jobId: msg.id, attempt: msg.attempt })
     const report = (what: string, e: unknown) => log.error(what, { err: e })
@@ -345,10 +358,10 @@ class QueueRuntime implements Queue {
         abort.signal.addEventListener('abort', () => reject(abort.signal.reason), { once: true })
       })
       aborted.catch(() => {})
-      await Promise.race([
-        job.handler(payload, this.deps[job.name] as never, { id: msg.id, attempt: msg.attempt, maxAttempts: msg.maxAttempts, signal: abort.signal, log }),
-        aborted,
-      ])
+      const run = (async () => job.handler(payload, this.deps[job.name] as never, { id: msg.id, attempt: msg.attempt, maxAttempts: msg.maxAttempts, signal: abort.signal, log }))()
+      run.catch(() => {})
+      track(run)
+      await Promise.race([run, aborted])
       await this.driver.complete(msg.id)
       log.debug('job done', { ms: Math.round(performance.now() - started) })
     } catch (e) {

@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-/** What the runner needs from a Postgres client. postgres.js clients fit as they are. */
-export interface SqlClient {
-  unsafe(query: string, params?: unknown[]): PromiseLike<readonly Record<string, unknown>[]>
-  begin<T>(fn: (tx: SqlClient) => Promise<T>): PromiseLike<T>
+export interface SqlQuery {
+  unsafe(query: string, params?: any[]): PromiseLike<readonly Record<string, unknown>[]>
+}
+/** What the data layer needs from a Postgres client. postgres.js clients fit as they are. */
+export interface SqlClient extends SqlQuery {
+  begin<T>(fn: (tx: SqlQuery) => Promise<T>): PromiseLike<T>
 }
 
 export interface Migration {

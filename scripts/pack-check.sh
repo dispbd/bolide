@@ -31,17 +31,24 @@ rm src/types-check.ts
 npm test --silent
 
 # The installed binary (from the tarball, not the repo) must serve the app.
-npx --no-install bolide help >/dev/null
+./node_modules/.bin/bolide help >/dev/null
 port=$(node -e "const s=require('net').createServer().listen(0,()=>{console.log(s.address().port);s.close()})")
-npx --no-install bolide dev --port "$port" >dev.log 2>&1 &
+# Run the installed bin directly (not through npx, which may not pass SIGTERM on), so kill reaches it.
+./node_modules/.bin/bolide dev --port "$port" >dev.log 2>&1 &
 dev=$!
 ok=
 for _ in $(seq 1 50); do
-  if curl -sf "http://localhost:$port/openapi.json" >/dev/null; then ok=1; break; fi
+  if curl -sf --max-time 2 "http://localhost:$port/openapi.json" >/dev/null; then ok=1; break; fi
   sleep 0.2
 done
 kill "$dev" 2>/dev/null || true
-wait "$dev" 2>/dev/null || true
+# bolide dev forwards SIGTERM to the app and exits; never wait forever if it doesn't.
+for _ in $(seq 1 25); do kill -0 "$dev" 2>/dev/null || break; sleep 0.2; done
+if kill -0 "$dev" 2>/dev/null; then
+  echo "pack-check: bolide dev did not exit on SIGTERM" >&2
+  kill -9 "$dev" 2>/dev/null || true
+  exit 1
+fi
 if [ -z "$ok" ]; then
   echo "pack-check: bolide dev did not serve the app" >&2
   cat dev.log >&2

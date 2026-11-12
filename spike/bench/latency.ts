@@ -52,10 +52,10 @@ const pct = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.min(
 const row = (label: string, xs: number[]) =>
   `| ${label} | ${pct(xs, 50).toFixed(2)} | ${pct(xs, 95).toFixed(2)} | ${pct(xs, 99).toFixed(2)} |`
 console.log(`N = ${N}, localhost, Node ${process.version}\n`)
-console.log('| Что | p50, мс | p95, мс | p99, мс |\n|---|---|---|---|')
-console.log(row('Изменение видно в UI (optimistic)', local))
-console.log(row('Подтверждено: запись вернулась через Electric', confirmed))
-console.log(row('Базовая линия: обычный POST без синхронизации', roundtrip))
+console.log('| Metric | p50, ms | p95, ms | p99, ms |\n|---|---|---|---|')
+console.log(row('Change visible in the UI (optimistic)', local))
+console.log(row('Confirmed: write synced back through Electric', confirmed))
+console.log(row('Baseline: plain POST without sync', roundtrip))
 
 await client.close()
 server.close()

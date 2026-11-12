@@ -1,20 +1,20 @@
-# ADR 0001: HTTP-ядро на Hono, своё только то, что отличает фреймворк
+# ADR 0001: HTTP core on Hono; build only what sets the framework apart
 
-Статус: предложено (фаза 0). Дата: 2026-10-23.
+Status: accepted (phase 0). Date: 2026-10-23.
 
-## Контекст
+## Context
 
-Нужно решить, писать ли своё HTTP-ядро или строиться поверх существующего. Требования: Web-стандарты (`Request`/`Response`), работа в Node, Bun, Deno и на edge, минимум зависимостей, типизация.
+We need to decide whether to write our own HTTP core or build on an existing one. Requirements: Web standards (`Request`/`Response`), running on Node, Bun, Deno and the edge, minimal dependencies, and types.
 
-## Решение
+## Decision
 
-1. **HTTP-слой: Hono.** Ноль зависимостей, Web-стандарты, все рантаймы. В прототипе сервер вместе с нашим кодом весит 8,3 КБ gzip. Своё ядро дало бы ту же функциональность ценой месяцев работы.
-2. **Своё: модули, DI, мутаторы, конфиг, CLI.** Это то, что отличает фреймворк от Hono, и именно это будет в фазе 1. Hono скрыт за нашим API (`defineModule`, `defineRoute`), чтобы при необходимости заменить его.
-3. **Синхронизация в фазе 3: Electric + TanStack DB за собственным интерфейсом транспорта.** Интерфейс тот, что уже есть в прототипе: «применить операции локально», «отправить», «дождаться подтверждения по txid». Это оставляет путь к Zero или своему движку (фаза 4).
-4. **Валидация через Standard Schema, по умолчанию лёгкая библиотека** (`zod/mini` или Valibot). Полный `zod` на клиенте прибавляет около 90 КБ gzip.
+1. **HTTP layer: Hono.** Zero dependencies, Web standards, every runtime. In the prototype the server plus our code is 8.3 KB gzipped. Our own core would give the same features at the cost of months of work.
+2. **Ours: modules, DI, mutators, config, CLI.** This is what sets the framework apart from Hono, and it is the scope of phase 1. Hono stays behind our own API (`defineModule`, `defineRoute`) so it can be replaced if needed.
+3. **Sync in phase 3: Electric + TanStack DB behind our own transport interface.** The interface is the one already in the prototype: apply operations locally, send them, wait for confirmation by txid. This keeps the door open to Zero or our own engine (phase 4).
+4. **Validation through Standard Schema, with a light library by default** (`zod/mini` or Valibot). Full `zod` adds about 90 KB gzipped to the client.
 
-## Последствия
+## Consequences
 
-- Фаза 1 начинается с модульной системы и DI, а не с роутера.
-- Зависимость от Hono нужно держать за адаптером, чтобы не протекала в пользовательский код.
-- TanStack DB в версии 0.x: возможны поломки при обновлениях, закрепляем версии.
+- Phase 1 starts with the module system and DI, not with the router.
+- The Hono dependency must stay behind an adapter so it does not leak into user code.
+- TanStack DB is still 0.x, so updates may break things; versions are pinned.

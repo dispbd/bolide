@@ -3,14 +3,14 @@ import { build } from 'esbuild'
 import { gzipSync } from 'node:zlib'
 
 const entries = [
-  ['Клиент Bolide целиком (TanStack DB + Electric + zod + мутаторы)', 'bolide-client', 'browser'],
-  ['  из них TanStack DB + electric-collection', 'tanstack-electric', 'browser'],
-  ['  из них @electric-sql/client', 'electric-client', 'browser'],
-  ['  из них zod (одна схема)', 'zod', 'browser'],
-  ['  для сравнения: zod/mini (та же схема)', 'zod-mini', 'browser'],
-  ['Сервер Bolide (Hono + наш код, без драйвера postgres)', 'hono-server', 'node'],
+  ['Full Bolide client (TanStack DB + Electric + zod + mutators)', 'bolide-client', 'browser'],
+  ['  of which TanStack DB + electric-collection', 'tanstack-electric', 'browser'],
+  ['  of which @electric-sql/client', 'electric-client', 'browser'],
+  ['  of which zod (one schema)', 'zod', 'browser'],
+  ['  for comparison: zod/mini (same schema)', 'zod-mini', 'browser'],
+  ['Bolide server (Hono + our code, without the postgres driver)', 'hono-server', 'node'],
 ]
-console.log('| Бандл | min, КБ | min+gzip, КБ |\n|---|---|---|')
+console.log('| Bundle | min, KB | min+gzip, KB |\n|---|---|---|')
 for (const [label, name, platform] of entries) {
   const r = await build({
     entryPoints: [`spike/bench/entries/${name}.ts`],

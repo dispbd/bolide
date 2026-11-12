@@ -1,38 +1,35 @@
 # Bolide
 
-Экспериментальный Node.js/TypeScript-фреймворк, который соединяет:
+An experimental Node.js/TypeScript framework that combines:
 
-- **структуру Nest.js**: модули, сервисы, внедрение зависимостей, но на функциях, без обязательных декораторов;
-- **встроенные возможности Meteor.js**: auth, данные, реактивность и, главное, optimistic UI через изоморфные мутаторы;
-- **лёгкость Total.js**: маленькое ядро на Web-стандартах, минимум зависимостей, один типизированный конфиг.
+- **the structure of Nest.js**: modules, services and dependency injection, built on plain functions with no mandatory decorators;
+- **the built-in features of Meteor.js**: auth, data and reactivity, and above all optimistic UI through isomorphic mutators;
+- **the lightness of Total.js**: a small core on Web standards, minimal dependencies and a single typed config.
 
-Исследование и обоснование: см. отчёт «Nest, Meteor и Total.js» в проекте.
+## Branches
 
-## Ветки
-
-| Ветка | Что внутри |
+| Branch | Contents |
 |---|---|
-| `main` | Описание проекта и roadmap. Фазы вливаются сюда после завершения. |
-| `phase-0` | Исследование и спайки. |
-| `phase-0-<задача>` | Тяжёлые подзадачи фазы, вливаются в ветку фазы. Через дефис, потому что git не даёт завести `phase-0/...` рядом с веткой `phase-0`. |
-| `phase-N` | Следующие фазы, по одной ветке на фазу. |
+| `main` | Stable state. Each phase is merged here when it is finished. |
+| `phase-N` | Work on phase N of the roadmap, one branch per phase. |
+| `phase-N-<task>` | Heavy sub-tasks of a phase, merged into the phase branch. They use a dash because git does not allow `phase-N/...` next to a `phase-N` branch. |
 
 ## Roadmap
 
-См. [docs/roadmap.md](docs/roadmap.md).
+See [docs/roadmap.md](docs/roadmap.md).
 
-## Запуск прототипа фазы 0
+## Running the phase 0 prototype
 
-Нужны Node 22+, Docker и Postgres 16 (бинарники в `/usr/lib/postgresql/16/bin` или путь в `PGBIN`).
+You need Node 22+, Docker and Postgres 16 (binaries in `/usr/lib/postgresql/16/bin`, or set `PGBIN`).
 
 ```bash
 npm install
 npm run db:up        # Postgres :54321 (wal_level=logical) + Electric :3000
-npm test             # юнит-тесты мутаторов
-npm run test:int     # два клиента через настоящий Electric
-npm run bench        # задержки optimistic / подтверждения
-npm run bundle-size  # размеры бандлов
+npm test             # mutator unit tests
+npm run test:int     # two clients through a real Electric instance
+npm run bench        # optimistic / confirmation latency
+npm run bundle-size  # bundle sizes
 npm run db:down
 ```
 
-Итоги фазы: [docs/phase-0/results.md](docs/phase-0/results.md). Решение по ядру: [docs/adr/0001-core-on-hono.md](docs/adr/0001-core-on-hono.md).
+Phase 0 results: [docs/phase-0/results.md](docs/phase-0/results.md). Core decision: [docs/adr/0001-core-on-hono.md](docs/adr/0001-core-on-hono.md).

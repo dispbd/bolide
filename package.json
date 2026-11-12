@@ -1,16 +1,17 @@
 {
-  "name": "bolide-spike",
+  "name": "bolide",
   "private": true,
   "type": "module",
   "scripts": {
     "db:up": "bash scripts/db-up.sh",
     "db:down": "bash scripts/db-down.sh",
     "server": "tsx spike/server/main.ts",
-    "test": "tsx --test spike/core/*.test.ts",
+    "test": "tsx --test spike/core/*.test.ts packages/*/test/*.test.ts",
     "test:int": "tsx --test spike/**/*.int.test.ts",
     "bench": "tsx spike/bench/latency.ts",
     "bundle-size": "node spike/bench/bundle-size.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:core": "tsx --test packages/*/test/*.test.ts"
   },
   "dependencies": {
     "@electric-sql/client": "^1.5.28",
@@ -27,5 +28,8 @@
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "5.9"
-  }
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

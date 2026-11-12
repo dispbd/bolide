@@ -1,0 +1,21 @@
+{
+  "name": "@bolide/core",
+  "version": "0.0.0",
+  "description": "Bolide core: modules, dependency injection, routes and config on Web standards",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0",
+    "hono": "^4.13.13"
+  },
+  "peerDependencies": {
+    "@hono/node-server": "^2.1.5"
+  },
+  "peerDependenciesMeta": {
+    "@hono/node-server": { "optional": true }
+  }
+}

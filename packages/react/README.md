@@ -23,6 +23,7 @@ function Todos() {
 - `useShape(shape)` returns `{ rows, status }`. It is built on `useSyncExternalStore`, so a component re-renders only when its shape's rows or status change. The stream starts with the first component that uses the shape and stops when the last one is gone. On the server it renders the empty `loading` state.
 - `useRow(shape, id)` is one row by primary key, or `undefined`.
 - `useMutation(mutator)` returns `{ mutate, status, error, reset }`. `mutate(input)` changes the local rows at once and returns the client's `Mutation`. `status` is the latest call's: `idle`, `pending`, then `confirmed`, or `rejected` with a `MutationRejected` in `error`. A rejected change is already rolled back in every shape; `error` is there to tell the user why.
+- `useClientStatus()` is `{ online, pending }`: whether the server answers and how many changes wait for it, for an "offline, 3 unsaved" badge. See [offline mode](../client/README.md#offline).
 - `useClient()` is the client from `<BolideProvider>`, for anything else (`client.pending()`, for instance).
 
 The UI doesn't have to wait on `status`: show the rows and let them change. Use `status` and `error` for a spinner or a message.

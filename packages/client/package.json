@@ -14,6 +14,11 @@
       "bolide-source": "./src/electric.ts",
       "types": "./dist/electric.d.ts",
       "default": "./dist/electric.js"
+    },
+    "./idb": {
+      "bolide-source": "./src/idb.ts",
+      "types": "./dist/idb.d.ts",
+      "default": "./dist/idb.js"
     }
   },
   "dependencies": {
@@ -37,5 +42,8 @@
   },
   "engines": {
     "node": ">=20.6"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.8"
   }
 }

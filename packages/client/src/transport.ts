@@ -15,6 +15,16 @@ export interface SyncSink {
   /** The server asked to start over: drop the rows; a full set follows. */
   reset(): void
   error(e: unknown): void
+  /** Where the stream is, after a batch that ended up to date: saved with the rows to resume after a reload. */
+  position?(position: SyncPosition): void
+  /** A request failed and is being retried: the server can't be reached right now. */
+  offline?(): void
+}
+
+/** A point in a shape's stream to resume from (Electric's offset and handle). */
+export interface SyncPosition {
+  offset: string
+  handle: string
 }
 
 /**
@@ -23,5 +33,5 @@ export interface SyncSink {
  */
 export interface SyncTransport {
   /** Starts streaming a shape from `url`. Returns a function that stops it. */
-  subscribe(request: { url: string; shape: AnyShape; headers: () => Record<string, string> }, sink: SyncSink): () => void
+  subscribe(request: { url: string; shape: AnyShape; headers: () => Record<string, string>; resume?: SyncPosition }, sink: SyncSink): () => void
 }

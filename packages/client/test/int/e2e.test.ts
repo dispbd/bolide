@@ -23,7 +23,7 @@ import {
   postgresSync,
   schemaSql,
 } from "@bolide/data/server";
-import { createClient, MutationRejected } from "../../src/index.ts";
+import { createClient, memoryStorage, MutationRejected, type ClientStorage } from "../../src/index.ts";
 import { electricTransport } from "../../src/electric.ts";
 
 // The whole loop on Postgres alone: browser client → mutate route → transaction → change log → shape stream → client.
@@ -107,9 +107,11 @@ describe("end to end on Postgres", () => {
     await admin.end();
   });
 
-  const browser = (user: string) => {
+  const browser = (user: string, storage?: ClientStorage) => {
+    const requests: URL[] = [];
     const fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(new URL(String(input), "http://app.test"), init);
+      requests.push(new URL(req.url));
       req.headers.set("x-user", user);
       return app.fetch(req);
     }) as typeof globalThis.fetch;
@@ -119,11 +121,12 @@ describe("end to end on Postgres", () => {
       userId: () => user,
       fetch,
       confirmTimeout: 5000,
+      ...(storage ? { storage } : {}),
     });
     const view = client.shape(mine);
     const changes: (readonly unknown[])[] = [];
     view.subscribe(() => changes.push(view.rows()));
-    return { client, view, changes };
+    return { client, view, changes, requests };
   };
   const until = async (check: () => boolean, what: string) => {
     for (let i = 0; i < 200 && !check(); i++)
@@ -195,6 +198,37 @@ describe("end to end on Postgres", () => {
     } finally {
       for (const b of [tab1, tab2, other]) b.client.close()
       // Let aborted long-polls finish before the app and the database close.
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  });
+
+  test("a reload shows the saved rows and resumes the stream, which brings what changed meanwhile", async () => {
+    const ann = crypto.randomUUID();
+    const storage = memoryStorage();
+    const first = browser(ann, storage);
+    const id = crypto.randomUUID();
+    try {
+      await first.view.ready;
+      await first.client.mutate(create, { id, title: "Saved" }).done;
+      await until(() => first.requests.some((u) => u.searchParams.get("offset") !== "-1"), "the stream moved past the first load");
+      await new Promise((r) => setTimeout(r, 250));
+      await first.client.saved();
+    } finally {
+      first.client.close();
+    }
+    // Meanwhile, from another device.
+    const other = crypto.randomUUID();
+    await sql.unsafe(`insert into todos (id, title, owner_id) values ($1, 'Elsewhere', $2)`, [other, ann]);
+
+    const second = browser(ann, storage);
+    try {
+      await second.view.ready;
+      assert.deepEqual(second.view.rows().map((r) => (r as { title: string }).title), ["Saved"], "from storage");
+      await until(() => second.view.rows().length === 2, "the change made elsewhere arrives");
+      const shapeRequests = second.requests.filter((u) => u.pathname.includes("/shape/"));
+      assert.ok(shapeRequests.length > 0 && shapeRequests.every((u) => u.searchParams.get("offset") !== "-1"), "resumed, not loaded again");
+    } finally {
+      second.client.close();
       await new Promise((r) => setTimeout(r, 100));
     }
   });

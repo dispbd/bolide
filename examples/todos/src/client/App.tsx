@@ -1,10 +1,11 @@
 import type { ShapeRow } from '@bolide/data'
-import { useMutation, useShape } from '@bolide/react'
+import { useClientStatus, useMutation, useShape } from '@bolide/react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { addTodo, myTodos, removeTodo, renameTodo, toggleTodo } from '../shared/schema.ts'
 
 export function App() {
   const { rows, status } = useShape(myTodos)
+  const sync = useClientStatus()
   const add = useMutation(addTodo)
   const [title, setTitle] = useState('')
   const sorted = useMemo(() => [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [rows])
@@ -38,6 +39,7 @@ export function App() {
         </>
       )}
       {status === 'error' && <p className="error">Lost the connection; retrying…</p>}
+      {!sync.online && <p className="muted">Offline{sync.pending ? `: ${sync.pending} change${sync.pending > 1 ? 's' : ''} will be sent when the server is back` : ''}.</p>}
     </main>
   )
 }

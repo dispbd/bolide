@@ -7,7 +7,7 @@ import { renderToString } from 'react-dom/server'
 import { z } from 'zod'
 import { defineMutator, defineShape, defineTable, t } from '@bolide/data'
 import { createClient, type SyncSink, type SyncTransport } from '@bolide/client'
-import { BolideProvider, useMutation, useRow, useShape } from '../src/index.ts'
+import { BolideProvider, useClientStatus, useMutation, useRow, useShape } from '../src/index.ts'
 
 const window = new Window()
 Object.assign(globalThis, { window, document: window.document, IS_REACT_ACT_ENVIRONMENT: true })
@@ -30,7 +30,7 @@ function setup(answer: () => Response = () => Response.json({ txid: '1' })) {
       return () => sinks.delete(shape.name)
     },
   }
-  const client = createClient({ transport, mutators: [add], confirmTimeout: 20, fetch: async () => answer() })
+  const client = createClient({ transport, mutators: [add], confirmTimeout: 20, retry: { initial: 1, max: 2 }, fetch: async () => answer() })
   const container = document.createElement('div')
   const root = createRoot(container as unknown as Element)
   const render = (node: ReactNode) => act(() => root.render(createElement(StrictMode, null, createElement(BolideProvider, { client }, node))))
@@ -112,6 +112,30 @@ describe('react hooks', () => {
       await new Promise((r) => setTimeout(r, 5))
     })
     assert.equal(container.textContent, '1 confirmed')
+    await act(async () => root.unmount())
+    client.close()
+  })
+
+  test('useClientStatus shows a lost connection and the changes waiting for it', async () => {
+    let online = false
+    const { client, container, render, root } = setup(() => {
+      if (!online) throw new TypeError('fetch failed')
+      return Response.json({})
+    })
+    const Badge = () => {
+      const { online, pending } = useClientStatus()
+      return createElement('p', null, `${online ? 'online' : 'offline'} ${pending}`)
+    }
+    await render(createElement(Badge))
+    assert.equal(container.textContent, 'online 0')
+    await act(async () => {
+      client.mutate(add, { id: crypto.randomUUID(), title: 'x' })
+      await new Promise((r) => setTimeout(r, 5))
+    })
+    assert.equal(container.textContent, 'offline 1')
+    online = true
+    await act(() => new Promise((r) => setTimeout(r, 10)))
+    assert.equal(container.textContent, 'online 0')
     await act(async () => root.unmount())
     client.close()
   })

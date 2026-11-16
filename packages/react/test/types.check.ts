@@ -1,7 +1,7 @@
 // Compile-time checks, run by `npm run typecheck`.
 import { z } from 'zod'
 import { defineMutator, defineShape, defineTable, t } from '@bolide/data'
-import { useMutation, useRow, useShape } from '../src/index.ts'
+import { useClientStatus, useMutation, useRow, useShape } from '../src/index.ts'
 
 const notes = defineTable('notes', { id: t.uuid().primaryKey(), body: t.text(), secret: t.text() })
 const pub = defineShape('notes.public', notes, { columns: ['body'] })
@@ -21,5 +21,8 @@ export function Check() {
   // @ts-expect-error body is a string
   m.mutate({ body: 1 })
   if (m.status === 'rejected') m.error.code satisfies string
+  const { online, pending } = useClientStatus()
+  online satisfies boolean
+  pending satisfies number
   return [body, s, id]
 }

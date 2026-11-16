@@ -21,6 +21,11 @@ export interface ReplicationSyncOptions {
   maxChanges?: number
   /** How long a live request waits for a change before it answers "still up to date". Default 20s. */
   longPoll?: number
+  /**
+   * Where trouble with the replication connection is reported: the first failure of each reconnect series, a
+   * message it couldn't read, and the recovery. Default `console.warn`.
+   */
+  log?: (message: string, error?: unknown) => void
 }
 
 /**
@@ -95,6 +100,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   const keep = options.keep ?? 600_000
   const maxChanges = options.maxChanges ?? 100_000
   const longPoll = options.longPoll ?? 20_000
+  const log = options.log ?? ((message: string, error?: unknown) => console.warn(`[bolide] ${message}`, ...(error === undefined ? [] : [error])))
 
   const logs = new Map<number, TableLog>() // by relation oid
   const byName = new Map<string, number>()
@@ -112,6 +118,9 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   let stream: { write(b: Uint8Array): boolean; end(): void; destroy(): void; on(e: string, f: (...a: any[]) => void): void } | undefined
   let ticker: ReturnType<typeof setInterval> | undefined
   let retry: ReturnType<typeof setTimeout> | undefined
+  let connecting: Promise<void> | undefined
+  /** Set while reconnecting, so a series of failures is reported once. */
+  let failing = false
   const trackedTables = new Set<string>()
 
   // ---- the stream ----
@@ -234,7 +243,12 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   }
 
   async function connect(): Promise<void> {
-    const { default: postgres } = await import('postgres')
+    const postgres = await import('postgres').then(
+      (m) => m.default,
+      (e) => {
+        throw new Error('replicationSync needs the "postgres" package for its replication connection: npm i postgres', { cause: e })
+      },
+    )
     const repl = postgres(options.url, { max: 1, fetch_types: false, idle_timeout: 0, max_lifetime: null, onnotice: () => {}, connection: { replication: 'database' } as Record<string, string> })
     replication = repl
     try {
@@ -265,12 +279,32 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       }
       const s = await repl.unsafe(`START_REPLICATION SLOT ${slot} LOGICAL ${formatLsn(from)} (proto_version '1', publication_names '${publication}')`).writable()
       stream = s as unknown as typeof stream
-      s.on('data', onData)
+      s.on('data', (buf: Uint8Array) => {
+        try {
+          onData(buf)
+        } catch (e) {
+          // Better to read the stream again from the last acknowledged position than to skip a change.
+          log('replicationSync could not read a message from the replication stream; reconnecting', e)
+          s.destroy()
+        }
+      })
       s.on('error', () => {})
       s.on('close', () => {
         if (stream === (s as unknown)) stream = undefined
-        if (!closed) reconnect()
+        if (closed) return
+        if (!failing) log('replicationSync lost its replication connection; reconnecting')
+        failing = true
+        reconnect()
       })
+      // close() ran while this connected: don't leave a stream behind it.
+      if (closed) {
+        stream = undefined
+        await endStream(s as unknown as NonNullable<typeof stream>)
+        await repl.end({ timeout: 1 }).catch(() => {})
+        return
+      }
+      if (failing) log('replicationSync is replicating again')
+      failing = false
     } catch (e) {
       await repl.end({ timeout: 0 }).catch(() => {})
       throw e
@@ -281,13 +315,26 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     void replication?.end().catch(() => {})
     replication = undefined
     clearTimeout(retry)
-    retry = setTimeout(
-      () =>
-        void connect().catch(() => {
-          if (!closed) reconnect(Math.min(delay * 2, 30_000))
-        }),
-      delay,
-    )
+    retry = setTimeout(() => {
+      connecting = connect()
+        .catch((e) => {
+          if (closed) return
+          if (!failing) log('replicationSync could not reconnect; retrying', e)
+          failing = true
+          reconnect(Math.min(delay * 2, 30_000))
+        })
+        .finally(() => (connecting = undefined))
+    }, delay)
+  }
+
+  /** Ends the stream, and gives up waiting for the server after a moment. */
+  async function endStream(s: NonNullable<typeof stream>) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      new Promise<void>((r) => (s.on('close', () => r()), s.end())),
+      new Promise<void>((r) => (timer = setTimeout(() => (s.destroy(), r()), 2000))),
+    ])
+    clearTimeout(timer)
   }
 
   async function startOnce(tables: string[]) {
@@ -314,6 +361,15 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     ticker.unref?.()
   }
 
+  /** Starts once; a start that failed (the database was down at boot) is tried again by the next caller. */
+  function begin(tables: string[]) {
+    if (!started) {
+      started = startOnce(tables)
+      started.catch(() => (started = undefined))
+    }
+    return started
+  }
+
   const tracking = new Map<string, Promise<TableLog>>()
   /** The log of `table`, set up for replication the first time it is asked for. */
   function track(table: string): Promise<TableLog> {
@@ -321,11 +377,11 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     let p = tracking.get(table)
     if (!p) {
       p = (async () => {
-        started ??= startOnce([table])
-        await started
+        await begin([table])
+        // Marked only once installed: a failed install is tried again by the next request.
         if (!trackedTables.has(table)) {
-          trackedTables.add(table)
           await install([table])
+          trackedTables.add(table)
         }
         return logs.get(byName.get(table)!)!
       })()
@@ -392,8 +448,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   return {
     subqueries: true,
     start: async (tables) => {
-      started ??= startOnce(tables)
-      await started
+      await begin(tables)
       for (const t of tables) if (!trackedTables.has(t)) await track(t)
     },
 
@@ -403,10 +458,11 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       clearTimeout(retry)
       for (const log of logs.values()) for (const wake of [...log.waiters]) wake()
       await started?.catch(() => {})
+      await connecting
       acknowledge()
       const s = stream
       stream = undefined
-      if (s) await new Promise<void>((r) => (s.on('close', () => r()), s.end()))
+      if (s) await endStream(s)
       await replication?.end({ timeout: 1 }).catch(() => {})
     },
 
@@ -419,6 +475,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       const live = protocol.get('live') === 'true'
 
       if (offsetParam === '-1') {
+        const loadStart = Date.now()
         let pos: Pos = [head, LAST]
         const { rows, snapshot } = await sql.begin(async (t) => {
           await t.unsafe('set transaction isolation level repeatable read')
@@ -429,14 +486,17 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         // A transaction already in the log but not in the snapshot (it committed while the snapshot was taken)
         // must still reach this client: start before it. Later ones in the log are sent again, which is harmless.
         // (For a table the rule reads, a change sent again means one more load, which is rare and also harmless.)
+        // Newest first, up to a change that was visible and had committed well before this load began: older
+        // ones were too.
         const start = pos
+        const settled = loadStart - 1000
         for (const l of [log, ...deps.map((d) => d.log)])
-          for (const c of l.changes) {
-            if (after(c.pos, start)) break
+          for (let i = l.changes.length - 1; i >= 0; i--) {
+            const c = l.changes[i]!
+            if (after(c.pos, start)) continue
             if (invisible(snapshot, c.xid)) {
               if (after(pos, [c.pos[0] - 1n, LAST])) pos = [c.pos[0] - 1n, LAST]
-              break
-            }
+            } else if (c.at < settled) break
           }
         const body = [...rows.map((r) => shapeMessage(table, 'insert', project(r.row as Record<string, unknown>, columns))), upToDate]
         return json(body, { 'electric-offset': offsetOfSafe(pos), 'electric-schema': '{}', 'electric-up-to-date': '' })

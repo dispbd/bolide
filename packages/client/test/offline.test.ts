@@ -15,7 +15,7 @@ const ann = crypto.randomUUID()
 const wait = (ms = 0) => new Promise((r) => setTimeout(r, ms))
 
 /** A browser session: a fake stream and a fake server, sharing `storage` with the sessions before it. */
-function session(storage: ClientStorage, opts: { user?: string; answer?: (body: { id: string; name: string }) => Response | 'offline' } = {}) {
+function session(storage: ClientStorage, opts: { user?: string | (() => string); answer?: (body: { id: string; name: string }) => Response | 'offline' } = {}) {
   const sinks = new Map<string, SyncSink>()
   const resumed: (SyncPosition | undefined)[] = []
   const transport: SyncTransport = {
@@ -29,7 +29,7 @@ function session(storage: ClientStorage, opts: { user?: string; answer?: (body: 
   const client = createClient({
     transport,
     mutators: [create],
-    userId: () => opts.user ?? ann,
+    userId: () => (typeof opts.user === 'function' ? opts.user() : (opts.user ?? ann)),
     storage,
     confirmTimeout: 20,
     retry: { initial: 1, max: 2 },
@@ -127,6 +127,46 @@ describe('offline mode', () => {
     assert.deepEqual(other.sent, [])
     assert.deepEqual(other.resumed, [undefined])
     other.client.close()
+  })
+
+  test('once another user signs in, the client stops saving', async () => {
+    const storage = memoryStorage()
+    let user = ann
+    const s = session(storage, { user: () => user, answer: () => 'offline' })
+    await wait()
+    user = crypto.randomUUID()
+    s.client.mutate(create, { id: crypto.randomUUID(), title: 'theirs' }).done.catch(() => {})
+    const sink = s.sinks.get('todos.mine')!
+    sink.changes([{ type: 'insert', row: row(crypto.randomUUID(), 'theirs') }], [])
+    sink.upToDate()
+    sink.position!({ offset: '1_0', handle: 'h' })
+    await wait(5)
+    await s.client.saved()
+    assert.deepEqual([...storage.data.keys()], [])
+    s.client.close()
+  })
+
+  test('clearStorage() forgets every saved shape and mutation, and stops saving', async () => {
+    const storage = memoryStorage()
+    await storage.set('other:key', 1)
+    const s = session(storage, { answer: () => 'offline' })
+    s.client.mutate(create, { id: crypto.randomUUID(), title: 'x' }).done.catch(() => {})
+    await wait()
+    const sink = s.sinks.get('todos.mine')!
+    sink.changes([{ type: 'insert', row: row(crypto.randomUUID(), 'x') }], [])
+    sink.upToDate()
+    sink.position!({ offset: '1_0', handle: 'h' })
+    await wait(5)
+    await s.client.saved()
+    await storage.set(`shape:${encodeURIComponent(crypto.randomUUID())}:todos.mine`, { rows: [] })
+    await s.client.clearStorage()
+    assert.deepEqual([...storage.data.keys()], ['other:key'])
+    s.client.mutate(create, { id: crypto.randomUUID(), title: 'y' }).done.catch(() => {})
+    sink.position!({ offset: '2_0', handle: 'h' })
+    await wait(5)
+    await s.client.saved()
+    assert.deepEqual([...storage.data.keys()], ['other:key'])
+    s.client.close()
   })
 
   test('a must-refetch drops the saved rows', async () => {

@@ -78,7 +78,7 @@ describe('bolide create', () => {
     assert.equal(pkg.dependencies['@bolide/react'], 'file:../../../../react')
     assert.equal(pkg.devDependencies['@bolide/cli'], 'file:../../..')
     assert.equal(await readFile(join(dir, '.gitignore'), 'utf8'), 'node_modules/\ndist/\n.env\n')
-    assert.match(await readFile(join(dir, 'migrations/0001_init.sql'), 'utf8'), /create table "todos"/)
+    assert.match(await readFile(join(dir, 'migrations/0001_init.sql'), 'utf8'), /create table "members"/)
 
     execFileSync(process.execPath, [tsc, '-p', dir], { stdio: 'pipe' })
     execFileSync(process.execPath, [tsxCli, '--test', 'test/todos.test.ts'], { stdio: 'pipe', cwd: dir })
@@ -94,9 +94,9 @@ describe('bolide create', () => {
 describe('the todos example', () => {
   test('its first migration creates the tables its schema defines', async () => {
     const { schemaSql } = await import('@bolide/data/server')
-    const { todos } = await import('../../../examples/todos/src/shared/schema.ts')
+    const { lists, members, todos } = await import('../../../examples/todos/src/shared/schema.ts')
     const migration = await readFile(new URL('../../../examples/todos/migrations/0001_init.sql', import.meta.url), 'utf8')
-    assert.ok(migration.includes(schemaSql([todos])), 'run `npm run db:sql` in examples/todos and update the migration')
+    assert.ok(migration.includes(schemaSql([lists, members, todos])), 'run `npm run db:sql` in examples/todos and update the migration')
   })
 })
 

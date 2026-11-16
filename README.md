@@ -26,8 +26,8 @@ An experimental Node.js/TypeScript framework that combines:
 | [`@bolide/mail`](packages/mail) | Mailer with memory, console, SMTP and HTTP transports. |
 | [`@bolide/storage`](packages/storage) | Files on memory, disk or S3-compatible services; uploads. |
 | [`@bolide/i18n`](packages/i18n) | Typed messages, ICU plurals, locale detection. |
-| [`@bolide/data`](packages/data) | Tables shared by the server and the browser: row types, validation, SQL and migrations. Mutators and sync are in progress (phase 3). |
-| [`@bolide/client`](packages/client) | Browser store synced with shapes; optimistic mutations with rollback; Electric transport. |
+| [`@bolide/data`](packages/data) | Tables, mutators and shapes shared by the server and the browser; rules that read other tables; sync from the WAL (`replicationSync`), a change log or Electric. |
+| [`@bolide/client`](packages/client) | Browser store synced with shapes; optimistic mutations with rollback; offline mode with IndexedDB. |
 | [`@bolide/react`](packages/react) | React hooks: `useShape`, `useRow`, `useMutation`. |
 | [`@bolide/vue`](packages/vue) | Vue composables: `useShape`, `useRow`, `useMutation`. |
 

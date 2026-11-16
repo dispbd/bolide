@@ -101,7 +101,7 @@ export function dataModule(options: DataModuleOptions): Module {
     if (!tables.has(sh.table)) throw new BolideError(`dataModule: shape "${sh.name}" reads table "${sh.table.name}", which is not in dataModule({ tables }).`)
     shapes.set(sh.name, sh)
   }
-  if (shapes.size && !options.sync) throw new BolideError('dataModule: shapes need a sync source. Pass sync: electric({ url: process.env.ELECTRIC_URL }).')
+  if (shapes.size && !options.sync) throw new BolideError('dataModule: shapes need a sync source. Pass sync: replicationSync(sql, { url }), postgresSync(sql) or electric({ url }).')
   // Try each rule with and without a user, to learn the other tables it reads before the first request.
   const syncTables = new Set([...shapes.values()].map((sh) => sh.table.name))
   for (const sh of shapes.values())

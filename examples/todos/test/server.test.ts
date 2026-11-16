@@ -37,27 +37,32 @@ describe('server', { skip: !url && 'set DATABASE_URL to run against Postgres' },
     assert.match(await js.text(), /todos\.mine/)
   })
 
-  test('each user syncs and changes only their own todos', async () => {
-    const as = (uid: string, path: string, body?: unknown) =>
-      app.fetch(
-        new Request(`http://test${path}`, {
-          method: body ? 'POST' : 'GET',
-          headers: { cookie: `uid=${uid}`, 'content-type': 'application/json' },
-          body: body === undefined ? undefined : JSON.stringify(body),
-        }),
-      )
-    const ann = crypto.randomUUID()
-    const bob = crypto.randomUUID()
+  test('a shared list reaches whoever joins it, and no one else', async () => {
+    const as = (uid: string) => ({
+      mutate: (name: string, input: unknown) =>
+        app.fetch(new Request('http://test/api/data/mutate', { method: 'POST', headers: { cookie: `uid=${uid}`, 'content-type': 'application/json' }, body: JSON.stringify({ id: crypto.randomUUID(), name, input }) })),
+      rows: async (shape: string) => {
+        const res = await app.fetch(new Request(`http://test/api/data/shape/${shape}?offset=-1`, { headers: { cookie: `uid=${uid}` } }))
+        return ((await res.json()) as { value?: Record<string, unknown> }[]).flatMap((m) => (m.value ? [m.value] : []))
+      },
+    })
+    const [ann, bob, cat] = [as(crypto.randomUUID()), as(crypto.randomUUID()), as(crypto.randomUUID())]
+    const listId = crypto.randomUUID()
     const id = crypto.randomUUID()
-    const added = await as(ann, '/api/data/mutate', { id: crypto.randomUUID(), name: 'todos.add', input: { id, title: 'Buy milk' } })
-    assert.equal(added.status, 200)
-    const stolen = await as(bob, '/api/data/mutate', { id: crypto.randomUUID(), name: 'todos.toggle', input: { id } })
-    assert.equal(stolen.status, 404, "bob can't touch ann's todo")
+    assert.equal((await ann.mutate('lists.create', { id: listId, name: 'Trip' })).status, 200)
+    assert.equal((await ann.mutate('todos.add', { id, listId, title: 'Tickets' })).status, 200)
+    assert.equal((await cat.mutate('todos.add', { id: crypto.randomUUID(), listId, title: 'Spam' })).status, 404, 'not a member')
+    assert.equal((await cat.mutate('todos.toggle', { id })).status, 404, "cat can't touch ann's todo")
     const anon = await app.fetch(new Request('http://test/api/data/shape/todos.mine?offset=-1'))
     assert.equal(anon.status, 401, 'no user, no shape')
+    assert.deepEqual(await bob.rows('todos.mine'), [])
 
-    const rows = async (uid: string) => ((await (await as(uid, '/api/data/shape/todos.mine?offset=-1')).json()) as { value?: { title: string } }[]).flatMap((m) => (m.value ? [m.value.title] : []))
-    assert.deepEqual(await rows(ann), ['Buy milk'])
-    assert.deepEqual(await rows(bob), [])
+    assert.equal((await bob.mutate('lists.join', { listId })).status, 200)
+    assert.deepEqual((await bob.rows('todos.mine')).map((t) => t.title), ['Tickets'])
+    assert.deepEqual((await bob.rows('lists.mine')).map((l) => l.name), ['Trip'])
+    assert.deepEqual(await cat.rows('todos.mine'), [])
+
+    assert.equal((await bob.mutate('lists.leave', { listId })).status, 200)
+    assert.deepEqual(await bob.rows('todos.mine'), [])
   })
 })

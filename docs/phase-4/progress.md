@@ -7,7 +7,7 @@ Plan: [plan.md](plan.md).
 | 1 | Offline mode (`phase-4-offline`) | Done. |
 | 2 | Logical replication (`phase-4-cdc`) | Done. |
 | 3 | Rules across tables (`phase-4-rules`) | Done. |
-| 4 | Measure and document (`phase-4-bench`) | |
+| 4 | Measure and document (`phase-4-bench`) | Done. |
 
 ## 1. Offline mode
 
@@ -36,3 +36,11 @@ Plan: [plan.md](plan.md).
 - `dataModule` tries each rule at boot (with and without a user) to find the tables it reads: they are set up with the others, and a source without `subqueries` (Electric) is refused with a message.
 - The browser shows a pending change to a row with such a rule; the server's answer decides.
 - Tests: SQL and deps (unit), boot refusal, and on Postgres for both sources: joining, leaving and giving away a membership, unrelated changes without reloads, live wake-ups.
+
+## 4. Measure and document
+
+- `npm run bench:sync` (`packages/data/bench/sync.ts`) measures commit-to-client latency, fan-out to the clients of a shape, and inserts per second with 1 and 100 clients, for `postgresSync` and `replicationSync`. Results and the choice between sources: [ADR 0002](../adr/0002-sync-sources.md). Electric wasn't measured (no Docker here).
+- The bench showed live clients of one shape running the same rule query each; `replicationSync` now shares one evaluation per shape and batch.
+- The todos example has lists shared by link: `lists`, `members` and `todos` tables, rules with `query()`, join and leave mutators whose membership checks run on the server only. It uses `replicationSync` when Postgres has `wal_level=logical` and `postgresSync` otherwise; the Electric profile is gone from its `docker-compose.yml`, since Electric can't follow these rules. Its migration was rewritten rather than extended, as the example isn't published yet.
+- The example now ends its connection pool on SIGTERM; before, the process stayed alive after the app closed.
+- Checked in Chromium with two users: a shared list reaches the second user about 100 ms after opening the link, changes go both ways in about 30 ms, and leaving removes the list.

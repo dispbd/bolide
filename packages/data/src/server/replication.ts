@@ -346,8 +346,23 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
 
   type Evaluated = { i: number; new_in: boolean; old_in: boolean; new_row: Record<string, unknown> | null; old_row: Record<string, unknown> | null }
 
+  // Live clients of the same shape (the same user in several tabs, or a shape everyone shares) wake up together
+  // with the same changes: they share one query. Entries go a few seconds after they settle.
+  const evaluations = new Map<string, Promise<Evaluated[]>>()
+  function evaluate(log: TableLog, where: WhereSql, changes: Change[]) {
+    const key = `${log.sqlName}\0${where.sql}\0${where.params.join('\0')}\0${offsetOf(changes[0]!.pos)}\0${offsetOf(changes[changes.length - 1]!.pos)}\0${changes.length}`
+    let p = evaluations.get(key)
+    if (!p) {
+      p = evaluateNow(log, where, changes)
+      evaluations.set(key, p)
+      const forget = () => setTimeout(() => evaluations.delete(key), 5000).unref?.()
+      p.then(forget, () => evaluations.delete(key))
+    }
+    return p
+  }
+
   /** Runs the shape's where on each change's old and new row, in Postgres, so it means exactly what the first load meant. */
-  async function evaluate(log: TableLog, where: WhereSql, changes: Change[]) {
+  async function evaluateNow(log: TableLog, where: WhereSql, changes: Change[]) {
     const cond = where.sql || 'true'
     const n = where.params.length
     const record = (col: string) => `jsonb_populate_record(null::${log.sqlName}, x.${col})`

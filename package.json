@@ -10,6 +10,7 @@
     "test:int": "tsx --conditions=bolide-source --test --test-force-exit spike/**/*.int.test.ts packages/*/test/int/*.test.ts examples/*/test/*.test.ts",
     "test:int:packages": "tsx --conditions=bolide-source --test --test-force-exit packages/*/test/int/*.test.ts examples/*/test/*.test.ts",
     "bench": "tsx spike/bench/latency.ts",
+    "bench:sync": "tsx --conditions=bolide-source packages/data/bench/sync.ts",
     "bundle-size": "node spike/bench/bundle-size.mjs",
     "typecheck": "tsc --noEmit",
     "pretest:core": "npm run build",

@@ -45,6 +45,10 @@ const page = (userId: string) => `<!doctype html>
     li span { flex: 1; }
     li.done span { text-decoration: line-through; opacity: .6; }
     li button { border: 0; background: none; cursor: pointer; opacity: .5; }
+    .lists { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .lists .current { font-weight: 600; }
+    .lists .new-list input { width: 8rem; }
+    .row { display: flex; justify-content: space-between; align-items: center; }
     .error { color: #c33; }
     .muted { opacity: .6; }
   </style>

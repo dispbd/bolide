@@ -57,6 +57,10 @@ export function whereSql(table: AnyTable, where: Where<AnyTable>): WhereSql {
 export interface SyncSource {
   /** Answers a shape request: `table`, `columns` and `where` are already decided by the server. */
   fetchShape(request: { table: string; columns: string[]; where: WhereSql; protocol: URLSearchParams; signal: AbortSignal }): Promise<Response>
+  /** Called at boot with the tables of every shape, so a setup mistake fails there and not at the first request. */
+  start?(tables: string[]): Promise<void>
+  /** Called on shutdown. */
+  close?(): Promise<void>
 }
 
 // The Electric client's protocol params; anything else from the browser is dropped.

@@ -21,6 +21,7 @@ import {
   dataModule,
   devSyncSql,
   postgresSync,
+  replicationSync,
   schemaSql,
 } from "@bolide/data/server";
 import { createClient, memoryStorage, MutationRejected, type ClientStorage } from "../../src/index.ts";
@@ -30,12 +31,8 @@ import { electricTransport } from "../../src/electric.ts";
 const url =
   process.env.DATABASE_URL ??
   "postgres://postgres:postgres@localhost:54321/bolide";
-const schema = `bolide_e2e_${process.pid}`;
 const admin = postgres(url, { onnotice: () => {} });
-const sql = postgres(url, {
-  onnotice: () => {},
-  connection: { search_path: schema },
-});
+after(() => admin.end());
 
 const todos = defineTable("todos", {
   id: t.uuid().primaryKey(),
@@ -75,7 +72,15 @@ const UserId = defineService({
   factory: ({ request }) => request.headers.get("x-user") ?? undefined,
 });
 
-describe("end to end on Postgres", () => {
+// The same loop on both Postgres-only sources.
+for (const source of ["postgresSync", "replicationSync"] as const)
+describe(`end to end on Postgres (${source})`, () => {
+  const schema = `bolide_e2e_${source.toLowerCase()}_${process.pid}`;
+  const slot = `bolide_e2e_${process.pid}`;
+  const sql = postgres(url, {
+    onnotice: () => {},
+    connection: { search_path: schema },
+  });
   let app: App;
   before(async () => {
     await admin.unsafe(`create schema ${schema}`);
@@ -93,7 +98,10 @@ describe("end to end on Postgres", () => {
           tables: [todos],
           mutators: [create, rename],
           shapes: [mine],
-          sync: postgresSync(sql, { longPoll: 2000 }),
+          sync:
+            source === "postgresSync"
+              ? postgresSync(sql, { longPoll: 2000 })
+              : replicationSync(sql, { url, slot, publication: slot, longPoll: 2000 }),
           userId: UserId,
         }),
       ],
@@ -104,7 +112,10 @@ describe("end to end on Postgres", () => {
     await app?.close();
     await sql.end();
     await admin.unsafe(`drop schema if exists ${schema} cascade`);
-    await admin.end();
+    if (source === "replicationSync") {
+      await admin.unsafe(`select pg_drop_replication_slot($1) from pg_replication_slots where slot_name = $1`, [slot]);
+      await admin.unsafe(`drop publication if exists ${slot}`);
+    }
   });
 
   const browser = (user: string, storage?: ClientStorage) => {

@@ -122,6 +122,19 @@ export function dataModule(options: DataModuleOptions): Module {
     },
   })
 
+  // The sync source starts with the app, so a database that can't serve shapes fails at boot.
+  const sync = options.sync
+  const Sync = defineService({
+    name: 'data sync',
+    factory: () => sync,
+    onInit: async () => {
+      if (shapes.size) await sync?.start?.([...new Set([...shapes.values()].map((sh) => sh.table.name))])
+    },
+    onDestroy: async () => {
+      if (shapes.size) await sync?.close?.()
+    },
+  })
+
   const mutate = defineRoute({
     method: 'POST',
     path: `${prefix}/mutate`,
@@ -162,8 +175,8 @@ export function dataModule(options: DataModuleOptions): Module {
   const shape = defineRoute({
     method: 'GET',
     path: `${prefix}/shape/:name`,
-    inject: { userId: options.userId ?? NoUser, log: Log },
-    handler: async ({ request, params }, { userId, log }) => {
+    inject: { userId: options.userId ?? NoUser, log: Log, sync: Sync },
+    handler: async ({ request, params }, { userId, log, sync }) => {
       const sh = shapes.get(params.name)
       if (!sh) throw new HttpError(404, `no shape "${params.name}"`, undefined, 'unknown_shape')
       let where = sh.where({ userId })
@@ -175,7 +188,7 @@ export function dataModule(options: DataModuleOptions): Module {
         where = false
       }
       if (where === false) throw new HttpError(userId === undefined ? 401 : 403, `shape "${sh.name}" is not readable here`)
-      return options.sync!.fetchShape({
+      return sync!.fetchShape({
         table: sh.table.name,
         columns: shapeColumns(sh),
         where: whereSql(sh.table, where),
@@ -185,6 +198,6 @@ export function dataModule(options: DataModuleOptions): Module {
     },
   })
 
-  const providers: AnyService[] = [Setup, allDeps, ...Object.values(serverDeps), ...(given ? [] : [sqlToken]), ...(options.userId ? [] : [NoUser])]
+  const providers: AnyService[] = [Setup, Sync, allDeps, ...Object.values(serverDeps), ...(given ? [] : [sqlToken]), ...(options.userId ? [] : [NoUser])]
   return defineModule({ name: 'data', providers, routes: shapes.size ? [mutate, shape] : [mutate] })
 }

@@ -4,3 +4,4 @@ export { dataModule, onServer, type DataModuleOptions, type MutationRequest, typ
 export { postgresTx } from './pg-tx.ts'
 export { electric, shapeColumns, whereSql, type ElectricOptions, type SyncSource, type WhereSql } from './shapes.ts'
 export { devSyncSql, postgresSync, type ListeningSqlClient, type PostgresSyncOptions } from './dev-sync.ts'
+export { replicationSql, replicationSync, type ReplicationSyncOptions } from './replication.ts'

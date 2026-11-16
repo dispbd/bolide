@@ -29,12 +29,13 @@ const dbTitles = async (where = 'true') => ((await sql.unsafe(`select title from
 /** Polls until the follower shows what the table (filtered by `where`) has now. */
 async function settle(f: ReturnType<typeof follower>, where = 'true') {
   const expected = await dbTitles(where)
+  let last = ''
   for (let i = 0; i < 100; i++) {
-    await f.catchUp()
+    last = await f.catchUp()
     if (JSON.stringify(f.titles()) === JSON.stringify(expected)) return
     await new Promise((r) => setTimeout(r, 20))
   }
-  assert.deepEqual(f.titles(), expected)
+  assert.deepEqual(f.titles(), expected, `the follower is at ${f.offset()} and its last poll gave ${last}`)
 }
 
 describe('replicationSync on Postgres', () => {
@@ -188,7 +189,10 @@ describe('replicationSync on Postgres', () => {
     await sync.start!(['items'])
     const f = follower(() => sync, all)
     await settle(f)
-    await admin.unsafe(`select pg_terminate_backend(active_pid) from pg_replication_slots where slot_name = '${slot}' and active_pid is not null`)
+    const [{ pid }] = await admin.unsafe(`select active_pid as pid from pg_replication_slots where slot_name = '${slot}'`)
+    await admin.unsafe(`select pg_terminate_backend($1)`, [pid])
+    // Write only once the old connection is gone, so the change comes on the new one.
+    for (let i = 0; i < 100 && (await admin.unsafe(`select 1 from pg_stat_activity where pid = $1`, [pid])).length; i++) await new Promise((r) => setTimeout(r, 20))
     await sql.unsafe(`insert into items (id, owner_id, title) values (30, 'ann', 'during the outage')`)
     for (let i = 0; i < 100 && !logged.some((m) => /again/.test(m)); i++) await new Promise((r) => setTimeout(r, 50))
     assert.deepEqual(logged, ['replicationSync lost its replication connection; reconnecting', 'replicationSync is replicating again'])

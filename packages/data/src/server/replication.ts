@@ -367,7 +367,8 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     for (let attempt = 0; ; attempt++) {
       try {
         await connect()
-        await catchUp()
+        // Only saves clients a load: a failure here must not leave the stream that connect() opened behind.
+        await catchUp().catch((e) => log('replicationSync could not wait for the changes sent again at start; starting anyway', e))
         break
       } catch (e) {
         const busy = /is active for PID/.test(String((e as Error)?.message))

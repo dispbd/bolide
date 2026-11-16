@@ -123,6 +123,8 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   let failing = false
   /** The delay before the next reconnect; it grows while reconnects don't lead to a transaction read. */
   let backoff = 1000
+  /** Counts a connection that stays up for a while as recovered, for a database with no writes. */
+  let steady: ReturnType<typeof setTimeout> | undefined
   const trackedTables = new Set<string>()
 
   // ---- the stream ----
@@ -163,9 +165,9 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         const t = tx
         tx = undefined
         if (m.end > seen) seen = m.end
-        recovered()
         // After a reconnect the server may send again what is already here.
         if (!t || t.lsn <= head) return
+        recovered()
         head = t.lsn
         const touched = new Set<TableLog>()
         for (const { relation, change } of t.changes) {
@@ -294,6 +296,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       })
       s.on('error', () => {})
       s.on('close', () => {
+        clearTimeout(steady)
         if (stream === (s as unknown)) stream = undefined
         if (closed) return
         if (!failing) log('replicationSync lost its replication connection; reconnecting')
@@ -307,6 +310,10 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         await repl.end({ timeout: 1 }).catch(() => {})
         return
       }
+      // A message that can't be read ends the stream within moments; one that stays up this long works.
+      clearTimeout(steady)
+      steady = setTimeout(recovered, 30_000)
+      steady.unref?.()
     } catch (e) {
       await repl.end({ timeout: 0 }).catch(() => {})
       throw e
@@ -332,8 +339,8 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   }
 
   /**
-   * A transaction was read: replication works again. Not when the connection opens, since a message that can't
-   * be read every time would otherwise reconnect every second forever.
+   * A transaction was read, or the connection stayed up: replication works again. Not as soon as the connection
+   * opens, since a message that can't be read every time would otherwise reconnect every second forever.
    */
   function recovered() {
     backoff = 1000
@@ -472,6 +479,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       closed = true
       clearInterval(ticker)
       clearTimeout(retry)
+      clearTimeout(steady)
       for (const log of logs.values()) for (const wake of [...log.waiters]) wake()
       await started?.catch(() => {})
       await connecting

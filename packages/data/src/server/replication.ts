@@ -396,10 +396,12 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     const [{ lsn }] = (await sql.unsafe(`select pg_current_wal_lsn()::text as lsn`)) as [{ lsn: string }]
     const target = parseLsn(lsn)
     for (const end = Date.now() + 10_000; Date.now() < end && !closed; ) {
+      // A logical walsender's keepalive carries the position it has sent up to, after the data before it.
       if (seen >= target || head >= target) return
       acknowledge(true)
       await new Promise((r) => setTimeout(r, 20))
     }
+    if (!closed) log('replicationSync started before the changes sent again had all arrived; clients that load now may load once more')
   }
 
   /** Starts once; a start that failed (the database was down at boot) is tried again by the next caller. */

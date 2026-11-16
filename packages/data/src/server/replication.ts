@@ -314,15 +314,32 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     ticker.unref?.()
   }
 
-  async function track(table: string) {
-    if (closed) throw new Error('replicationSync is closed')
-    started ??= startOnce([table])
-    await started
-    if (!trackedTables.has(table)) {
-      trackedTables.add(table)
-      await install([table])
+  const tracking = new Map<string, Promise<TableLog>>()
+  /** The log of `table`, set up for replication the first time it is asked for. */
+  function track(table: string): Promise<TableLog> {
+    if (closed) return Promise.reject(new Error('replicationSync is closed'))
+    let p = tracking.get(table)
+    if (!p) {
+      p = (async () => {
+        started ??= startOnce([table])
+        await started
+        if (!trackedTables.has(table)) {
+          trackedTables.add(table)
+          await install([table])
+        }
+        return logs.get(byName.get(table)!)!
+      })()
+      p.catch(() => tracking.delete(table))
+      tracking.set(table, p)
     }
-    return logs.get(byName.get(table)!)!
+    return p
+  }
+
+  /** Changes of `log` after `offset`, oldest first. */
+  function since(log: TableLog, offset: Pos) {
+    const out: Change[] = []
+    for (let i = log.changes.length - 1; i >= 0 && after(log.changes[i]!.pos, offset); i--) out.push(log.changes[i]!)
+    return out.reverse()
   }
 
   // ---- shapes ----
@@ -358,6 +375,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   }
 
   return {
+    subqueries: true,
     start: async (tables) => {
       started ??= startOnce(tables)
       await started
@@ -379,6 +397,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
 
     async fetchShape({ table, columns, where, protocol, signal }) {
       const log = await track(table)
+      const deps = await Promise.all((where.deps ?? []).map(async (d) => ({ log: await track(d.table), where: d.where })))
       const handle = `r-${hash(`${systemId}|${table}|${columns.join(',')}|${where.sql}|${where.params.join('\u0000')}`)}`
       const json = shapeResponse(handle)
       const offsetParam = protocol.get('offset') ?? '-1'
@@ -394,13 +413,16 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         })
         // A transaction already in the log but not in the snapshot (it committed while the snapshot was taken)
         // must still reach this client: start before it. Later ones in the log are sent again, which is harmless.
-        for (const c of log.changes) {
-          if (after(c.pos, pos)) break
-          if (invisible(snapshot, c.xid)) {
-            pos = [c.pos[0] - 1n, LAST]
-            break
+        // (For a table the rule reads, a change sent again means one more load, which is rare and also harmless.)
+        const start = pos
+        for (const l of [log, ...deps.map((d) => d.log)])
+          for (const c of l.changes) {
+            if (after(c.pos, start)) break
+            if (invisible(snapshot, c.xid)) {
+              if (after(pos, [c.pos[0] - 1n, LAST])) pos = [c.pos[0] - 1n, LAST]
+              break
+            }
           }
-        }
         const body = [...rows.map((r) => shapeMessage(table, 'insert', project(r.row as Record<string, unknown>, columns))), upToDate]
         return json(body, { 'electric-offset': offsetOfSafe(pos), 'electric-schema': '{}', 'electric-up-to-date': '' })
       }
@@ -409,24 +431,27 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       const offset = parseOffset(offsetParam)
       if (!offset) return json({ message: `bad offset "${offsetParam}"` }, {}, 400)
       // Older than what is kept (or from before a lost slot): start over.
-      if (after(log.floor, offset)) return json(mustRefetch, {}, 409)
+      if ([log, ...deps.map((d) => d.log)].some((l) => after(l.floor, offset))) return json(mustRefetch, {}, 409)
 
-      const pending = () => {
-        const out: Change[] = []
-        // Changes are in order; walk back from the newest.
-        for (let i = log.changes.length - 1; i >= 0 && after(log.changes[i]!.pos, offset); i--) out.push(log.changes[i]!)
-        return out.reverse()
-      }
-      const woken = live ? waiter(log.waiters, signal, longPoll) : undefined
-      let top: Pos = [head, LAST]
-      let changes = pending()
-      if (!changes.length && woken) {
+      // Everything up to `top` is read at the same moment, so the offset given back covers exactly what was checked.
+      const read = () => ({ top: [head, LAST] as Pos, changes: since(log, offset), depChanges: deps.map((d) => since(d.log, offset)) })
+      const woken = live ? waiter([log.waiters, ...deps.map((d) => d.log.waiters)], signal, longPoll) : undefined
+      let { top, changes, depChanges } = read()
+      if (!changes.length && !depChanges.some((c) => c.length) && woken) {
         await woken.promise
-        top = [head, LAST]
-        if (!signal.aborted) changes = pending()
+        if (!signal.aborted) ({ top, changes, depChanges } = read())
       }
       woken?.cancel()
       if (changes.some((c) => c.op === 'truncate')) return json(mustRefetch, {}, 409)
+      // A row that a query(...) of the rule reads changed in a way that matters: the shape's rows may differ now.
+      for (const [k, dc] of depChanges.entries()) {
+        if (!dc.length) continue
+        if (dc.some((c) => c.op === 'truncate')) return json(mustRefetch, {}, 409)
+        for (let i = 0; i < dc.length; i += PAGE) {
+          const evaluated = await evaluate(deps[k]!.log, deps[k]!.where, dc.slice(i, i + PAGE))
+          if (evaluated.some((e) => e.new_in || e.old_in)) return json(mustRefetch, {}, 409)
+        }
+      }
 
       const page = changes.slice(0, PAGE)
       const messages: unknown[] = []

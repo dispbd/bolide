@@ -122,6 +122,20 @@ export const directory = defineShape('users.directory', users, { columns: ['emai
 
 The browser asks for a shape by name and never sends a table, columns or a filter, so anyone who opens the network tab still gets only what `where` allows. `where` runs on the server for every request and returns conditions joined with AND: a value means equality, `null` means IS NULL, and `{ in: [...] }`, `{ ne }`, `{ gt }`, `{ gte }`, `{ lt }`, `{ lte }` compare. Column names come from the table and every value is a SQL parameter. JSON columns can't be filtered on.
 
+### Rules that read other tables
+
+`query(table, column, where)` is the list of `column` values of the `table` rows that match `where`, for `{ in: ... }`:
+
+```ts
+import { defineShape, query } from '@bolide/data'
+
+export const sharedTodos = defineShape('todos.shared', todos, {
+  where: ({ userId }) => (userId ? { listId: { in: query(members, 'listId', { userId }) } } : false),
+})
+```
+
+The server runs it as a subquery. When a `members` row that matches `{ userId }` is added, changed or deleted, the shape's clients load it again, so todos appear and vanish as the user joins and leaves lists; changes to other users' memberships cost them nothing. Queries can nest three deep, and the column types must match (TypeScript checks it). `replicationSync()` and `postgresSync()` follow such rules; `dataModule` refuses them at boot with `electric()`, which wouldn't notice the other table change. In the browser, a pending change to a row with such a rule is shown, and the server's answer decides.
+
 On the server, add the shapes and a sync source to `dataModule`:
 
 ```ts

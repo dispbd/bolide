@@ -30,4 +30,4 @@ export {
   type MutatorOptions,
   type MutatorTx,
 } from './mutator.ts'
-export { defineShape, type AnyShape, type Condition, type Shape, type ShapeContext, type ShapeOptions, type ShapeRow, type Where } from './shape.ts'
+export { defineShape, isQuery, query, type AnyShape, type Condition, type Query, type Shape, type ShapeContext, type ShapeOptions, type ShapeRow, type Where } from './shape.ts'

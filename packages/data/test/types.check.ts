@@ -1,7 +1,7 @@
 // Compile-time checks for @bolide/data, run by `npm run typecheck`.
 import { z } from 'zod'
 import { defineService } from '@bolide/core'
-import { defineMutator, defineShape, defineTable, t, type Insert, type Patch, type Row, type ShapeRow, type Where } from '../src/index.ts'
+import { defineMutator, defineShape, defineTable, query, t, type Insert, type Patch, type Row, type ShapeRow, type Where } from '../src/index.ts'
 import { onServer } from '../src/server/index.ts'
 
 const todos = defineTable('todos', {
@@ -29,6 +29,12 @@ export const where: Where<typeof todos> = { priority: { gte: 2 }, note: null, ti
 export const badWhere: Where<typeof todos> = { priority: 'high' }
 // @ts-expect-error no such column
 export const noColumn: Where<typeof todos> = { owner: 'x' }
+const tags = defineTable('tags', { id: t.uuid().primaryKey(), todoId: t.uuid(), rank: t.integer(), label: t.text() })
+export const viaQuery: Where<typeof todos> = { id: { in: query(tags, 'todoId', { label: 'x' }) } }
+// @ts-expect-error rank is a number, title a string
+export const wrongQuery: Where<typeof todos> = { title: { in: query(tags, 'rank') } }
+// @ts-expect-error tags has no column nope
+query(tags, 'nope')
 
 const titles = defineShape('todos.titles', todos, { columns: ['title'] })
 export const shaped: ShapeRow<typeof titles> = { id: '', title: '' }

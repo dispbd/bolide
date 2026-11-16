@@ -29,18 +29,18 @@ export function hash(s: string) {
   return (h >>> 0).toString(36)
 }
 
-/** Waits on `set` for a wake-up, a timeout or an abort; register before reading, so nothing slips between. */
-export function waiter(set: Set<() => void>, signal: AbortSignal, ms: number) {
+/** Waits on `sets` for a wake-up, a timeout or an abort; register before reading, so nothing slips between. */
+export function waiter(sets: Set<() => void>[], signal: AbortSignal, ms: number) {
   let done!: () => void
   const promise = new Promise<void>((resolve) => {
     done = () => {
       clearTimeout(timer)
-      set.delete(done)
+      for (const set of sets) set.delete(done)
       signal.removeEventListener('abort', done)
       resolve()
     }
     const timer = setTimeout(done, ms)
-    set.add(done)
+    for (const set of sets) set.add(done)
     signal.addEventListener('abort', done)
   })
   return { promise, cancel: () => done() }

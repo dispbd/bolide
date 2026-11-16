@@ -102,6 +102,21 @@ export function dataModule(options: DataModuleOptions): Module {
     shapes.set(sh.name, sh)
   }
   if (shapes.size && !options.sync) throw new BolideError('dataModule: shapes need a sync source. Pass sync: electric({ url: process.env.ELECTRIC_URL }).')
+  // Try each rule with and without a user, to learn the other tables it reads before the first request.
+  const syncTables = new Set([...shapes.values()].map((sh) => sh.table.name))
+  for (const sh of shapes.values())
+    for (const userId of [undefined, '00000000-0000-4000-8000-000000000000']) {
+      let deps: { table: string }[] = []
+      try {
+        const where = sh.where({ userId })
+        if (where !== false) deps = whereSql(sh.table, where).deps ?? []
+      } catch {
+        continue // the request will report it
+      }
+      if (deps.length && !options.sync?.subqueries)
+        throw new BolideError(`dataModule: shape "${sh.name}" reads ${deps[0]!.table} through query(), which this sync source doesn't follow. Use replicationSync() or postgresSync().`)
+      for (const d of deps) syncTables.add(d.table)
+    }
   const prefix = (options.prefix ?? '/api/data').replace(/\/$/, '')
   if (!prefix.startsWith('/')) throw new BolideError(`dataModule prefix must start with "/", got "${options.prefix}".`)
 
@@ -128,7 +143,7 @@ export function dataModule(options: DataModuleOptions): Module {
     name: 'data sync',
     factory: () => sync,
     onInit: async () => {
-      if (shapes.size) await sync?.start?.([...new Set([...shapes.values()].map((sh) => sh.table.name))])
+      if (shapes.size) await sync?.start?.([...syncTables])
     },
     onDestroy: async () => {
       if (shapes.size) await sync?.close?.()

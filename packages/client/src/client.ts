@@ -186,9 +186,10 @@ export function createClient(options: ClientOptions) {
   const mutationKey = (p: PendingMutation) => `${mutationPrefix}${p.savedAt}:${p.id}`
   let writes = Promise.resolve()
   let cleared = false
-  const write = (fn: (s: ClientStorage) => Promise<void>) => {
+  /** Saves under this user's key; deletes (which only remove this user's own data) go through after a change of user too. */
+  const write = (fn: (s: ClientStorage) => Promise<void>, kind: 'set' | 'delete' = 'set') => {
     // Another user signed in (or this one signed out): their data must not land under this user's key.
-    if (!storage || cleared || encodeURIComponent(userId() ?? '') !== scope) return
+    if (!storage || cleared || (kind === 'set' && encodeURIComponent(userId() ?? '') !== scope)) return
     writes = writes.then(() => fn(storage)).catch(onStorageError)
   }
 
@@ -399,7 +400,7 @@ export function createClient(options: ClientOptions) {
             state.rows.clear()
             clearTimeout(state.saveTimer)
             state.saveTimer = undefined
-            write((st) => st.delete(shapeKey(sh.name)))
+            write((st) => st.delete(shapeKey(sh.name)), 'delete')
             void rebuild()
           },
           error: () => {
@@ -522,7 +523,7 @@ export function createClient(options: ClientOptions) {
         const mutator = mutators.get(saved.name)
         // The app no longer has this mutator: nothing can send it.
         if (!mutator) {
-          write((st) => st.delete(key))
+          write((st) => st.delete(key), 'delete')
           continue
         }
         const { p, step } = enqueue(mutator, saved.input, saved.id, false)
@@ -535,7 +536,7 @@ export function createClient(options: ClientOptions) {
   function reject(p: PendingMutation, error: MutationRejected) {
     p.status = 'rejected'
     // A closed client keeps its saved mutations: the next session sends them.
-    if (error.code !== 'closed') write((st) => st.delete(mutationKey(p)))
+    if (error.code !== 'closed') write((st) => st.delete(mutationKey(p)), 'delete')
     if (!closed) setStatus({ pending: unconfirmed() })
     p.settle.reject(error)
     options.onRejected?.(p.handle, error)
@@ -544,7 +545,7 @@ export function createClient(options: ClientOptions) {
   function finish(p: PendingMutation) {
     const i = pending.indexOf(p)
     if (i >= 0) pending.splice(i, 1)
-    if (p.status === 'confirmed') write((st) => st.delete(mutationKey(p)))
+    if (p.status === 'confirmed') write((st) => st.delete(mutationKey(p)), 'delete')
     setStatus({ pending: unconfirmed() })
     return rebuild()
   }

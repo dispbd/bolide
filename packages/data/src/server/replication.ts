@@ -121,6 +121,8 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   let connecting: Promise<void> | undefined
   /** Set while reconnecting, so a series of failures is reported once. */
   let failing = false
+  /** The delay before the next reconnect; it grows while reconnects don't lead to a transaction read. */
+  let backoff = 1000
   const trackedTables = new Set<string>()
 
   // ---- the stream ----
@@ -161,6 +163,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         const t = tx
         tx = undefined
         if (m.end > seen) seen = m.end
+        recovered()
         // After a reconnect the server may send again what is already here.
         if (!t || t.lsn <= head) return
         head = t.lsn
@@ -284,7 +287,8 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
           onData(buf)
         } catch (e) {
           // Better to read the stream again from the last acknowledged position than to skip a change.
-          log('replicationSync could not read a message from the replication stream; reconnecting', e)
+          if (!failing) log('replicationSync could not read a message from the replication stream; reconnecting', e)
+          failing = true
           s.destroy()
         }
       })
@@ -303,28 +307,39 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         await repl.end({ timeout: 1 }).catch(() => {})
         return
       }
-      if (failing) log('replicationSync is replicating again')
-      failing = false
     } catch (e) {
       await repl.end({ timeout: 0 }).catch(() => {})
       throw e
     }
   }
 
-  function reconnect(delay = 1000) {
+  function reconnect() {
     void replication?.end().catch(() => {})
     replication = undefined
     clearTimeout(retry)
+    const delay = backoff
+    backoff = Math.min(backoff * 2, 30_000)
     retry = setTimeout(() => {
       connecting = connect()
         .catch((e) => {
           if (closed) return
           if (!failing) log('replicationSync could not reconnect; retrying', e)
           failing = true
-          reconnect(Math.min(delay * 2, 30_000))
+          reconnect()
         })
         .finally(() => (connecting = undefined))
     }, delay)
+  }
+
+  /**
+   * A transaction was read: replication works again. Not when the connection opens, since a message that can't
+   * be read every time would otherwise reconnect every second forever.
+   */
+  function recovered() {
+    backoff = 1000
+    if (!failing) return
+    failing = false
+    log('replicationSync is replicating again')
   }
 
   /** Ends the stream, and gives up waiting for the server after a moment. */
@@ -354,6 +369,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         await new Promise((r) => setTimeout(r, 500))
       }
     }
+    if (closed) return
     ticker = setInterval(() => {
       for (const log of logs.values()) prune(log)
       acknowledge()

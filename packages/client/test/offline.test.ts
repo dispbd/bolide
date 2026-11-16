@@ -146,6 +146,23 @@ describe('offline mode', () => {
     s.client.close()
   })
 
+  test('a mutation confirmed after another user signed in is still forgotten', async () => {
+    const storage = memoryStorage()
+    let user = ann
+    let up = false
+    const s = session(storage, { user: () => user, answer: () => (up ? Response.json({ txid: '1' }) : 'offline') })
+    const m = s.client.mutate(create, { id: crypto.randomUUID(), title: 'mine' })
+    await wait(5)
+    await s.client.saved()
+    assert.equal([...storage.data.keys()].filter((k) => k.startsWith('mutation:')).length, 1)
+    user = crypto.randomUUID()
+    up = true
+    await m.done
+    await s.client.saved()
+    assert.deepEqual([...storage.data.keys()].filter((k) => k.startsWith('mutation:')), [])
+    s.client.close()
+  })
+
   test('clearStorage() forgets every saved shape and mutation, and stops saving', async () => {
     const storage = memoryStorage()
     await storage.set('other:key', 1)

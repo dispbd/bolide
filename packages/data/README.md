@@ -122,6 +122,20 @@ export const directory = defineShape('users.directory', users, { columns: ['emai
 
 The browser asks for a shape by name and never sends a table, columns or a filter, so anyone who opens the network tab still gets only what `where` allows. `where` runs on the server for every request and returns conditions joined with AND: a value means equality, `null` means IS NULL, and `{ in: [...] }`, `{ ne }`, `{ gt }`, `{ gte }`, `{ lt }`, `{ lte }` compare. Column names come from the table and every value is a SQL parameter. JSON columns can't be filtered on.
 
+### Rules that read other tables
+
+`query(table, column, where)` is the list of `column` values of the `table` rows that match `where`, for `{ in: ... }`:
+
+```ts
+import { defineShape, query } from '@bolide/data'
+
+export const sharedTodos = defineShape('todos.shared', todos, {
+  where: ({ userId }) => (userId ? { listId: { in: query(members, 'listId', { userId }) } } : false),
+})
+```
+
+The server runs it as a subquery. When a `members` row that matches `{ userId }` is added, changed or deleted, the shape's clients load it again, so todos appear and vanish as the user joins and leaves lists; changes to other users' memberships cost them nothing. Queries can nest three deep, and the column types must match (TypeScript checks it). `replicationSync()` and `postgresSync()` follow such rules; `dataModule` refuses them at boot with `electric()`, which wouldn't notice the other table change. In the browser, a pending change to a row with such a rule is shown, and the server's answer decides.
+
 On the server, add the shapes and a sync source to `dataModule`:
 
 ```ts
@@ -132,9 +146,29 @@ dataModule({ sql, tables, mutators, shapes: [myTodos, directory], sync: electric
 
 `GET /api/data/shape/todos.mine` proxies the [Electric](https://electric-sql.com) shape protocol. Only Electric's own protocol params (`offset`, `handle`, `live`, `cursor`...) pass through from the browser. Cache headers become `private` with `Vary: cookie, authorization`, because the rows depend on who asks. For Electric Cloud, pass `sourceId` and `secret`; they stay on the server.
 
+### Without Electric: logical replication
+
+Which source to use, with measurements: [ADR 0002](../../docs/adr/0002-sync-sources.md).
+
+`replicationSync(sql, { url })` reads Postgres's write-ahead log itself, so it needs no extra service and doesn't slow writers down. It needs `wal_level=logical` (Postgres 13 or later), like Electric:
+
+```ts
+import { dataModule, replicationSync } from '@bolide/data/server'
+
+dataModule({ sql, tables, mutators, shapes, sync: replicationSync(sql, { url: process.env.DATABASE_URL! }), userId: CurrentUserId })
+```
+
+- At boot it checks `wal_level`, creates the publication `bolide` with the shapes' tables and sets their `REPLICA IDENTITY FULL`, so an update that moves a row out of a shape is seen. A database user that may not change tables can run `replicationSql(tables)` in a migration instead, with `install: false`. Mistakes fail at boot with what to do.
+- It opens one replication connection (with the `postgres` package) on a slot named `bolide`. The slot survives restarts: the app tells Postgres to keep the WAL of the changes it still holds, and reads them again after a restart, so clients resume where they were. Each running instance of the app needs its own slot (`slot: 'bolide_' + instanceId`); a slot left behind by an instance that is gone keeps WAL until it is dropped (`select pg_drop_replication_slot('...')`).
+- Changes are kept in memory for 10 minutes (`keep`, and at most `maxChanges` per table). A client further behind, or one from before a lost slot or a `TRUNCATE`, loads its shape again.
+- Offsets are WAL positions, so they mean the same on every instance and after a restart.
+- If the replication connection drops, it reconnects with backoff and reads on from where it was. The first failure of each outage and the recovery go to `log` (default `console.warn`): `replicationSync(sql, { url, log: (msg, err) => logger.warn(msg, { err }) })`.
+- A first load reads the table in a snapshot and starts the stream before any transaction that the snapshot doesn't include, by its transaction id. Changes the snapshot already has may be sent again, which the client applies without effect.
+- Each live request runs the shape's `where` on the new changes in Postgres, so a change matches exactly as the first load would have matched it.
+
 ### Without Electric: development and tests
 
-Electric is a separate service and needs `wal_level=logical`. For development and tests, `postgresSync(sql)` serves the same shape protocol from Postgres alone, so the browser keeps using `electricTransport()`:
+Electric is a separate service, and both it and `replicationSync` need `wal_level=logical`. For development and tests, `postgresSync(sql)` serves the same shape protocol from Postgres alone, so the browser keeps using `electricTransport()`:
 
 ```ts
 import { dataModule, electric, postgresSync } from '@bolide/data/server'

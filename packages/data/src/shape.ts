@@ -1,7 +1,37 @@
 import type { AnyTable, Row } from './table.ts'
 
 /** A comparison on one column. A plain value means equality; `null` means IS NULL. */
-export type Condition<V> = V | null | { in: readonly V[] } | { ne: V | null } | { gt: V } | { gte: V } | { lt: V } | { lte: V }
+export type Condition<V> = V | null | { in: readonly V[] | Query<V> } | { ne: V | null } | { gt: V } | { gte: V } | { lt: V } | { lte: V }
+
+/** One column of the rows of another table that match `where`: the list for `{ in: query(...) }`. */
+export interface Query<V = unknown> {
+  readonly kind: 'query'
+  readonly table: AnyTable
+  readonly column: string
+  readonly where: Where<AnyTable>
+  /** Type carrier for the column's values; undefined at run time. */
+  readonly $value?: V
+}
+
+/**
+ * Rows of another table, for a rule like "todos of the lists I'm a member of":
+ *
+ * ```ts
+ * defineShape('todos.shared', todos, {
+ *   where: ({ userId }) => (userId ? { listId: { in: query(members, 'listId', { userId }) } } : false),
+ * })
+ * ```
+ *
+ * When a `members` row of that user changes, clients of the shape load it again, so todos appear and vanish
+ * as the user joins and leaves lists. Needs `replicationSync()` or `postgresSync()`.
+ */
+export function query<T extends AnyTable, K extends keyof Row<T> & string>(table: T, column: K, where: Where<T> = {}): Query<Exclude<Row<T>[K], null>> {
+  if (!Object.hasOwn(table.columns, column)) throw new TypeError(`query(${table.name}): no column "${column}".`)
+  return Object.freeze({ kind: 'query', table, column, where: where as Where<AnyTable> })
+}
+
+/** Whether `v` is a `query(...)`. */
+export const isQuery = (v: unknown): v is Query => typeof v === 'object' && v !== null && (v as { kind?: unknown }).kind === 'query'
 
 /** Conditions on columns, joined with AND: `{ ownerId: userId, done: false }`. */
 export type Where<T extends AnyTable> = { [K in keyof Row<T>]?: Condition<Exclude<Row<T>[K], null>> }

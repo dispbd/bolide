@@ -45,6 +45,26 @@ In Node (tests, server rendering), Electric's client keeps a 60-second timer aft
 
 The store is our own rather than TanStack DB's: it is smaller (client, data layer and Electric client are about 23 KB minified and gzipped) and lets pending mutations be replayed by running the mutators again, not by patching rows.
 
-`client.close()` stops the streams and the sending. Mutations not yet confirmed reject with code `closed`.
+`client.close()` stops the streams and the sending. Mutations not yet confirmed reject with code `closed`; with a `storage`, they stay saved and the next session sends them.
 
-Not yet: keeping pending mutations across page reloads (phase 4), queries across shapes.
+## Offline
+
+Give the client a `storage` and it works through a lost connection and a reload:
+
+```ts
+import { indexedDbStorage } from '@bolide/client/idb'
+
+const client = createClient({ transport: electricTransport(), mutators, storage: indexedDbStorage() })
+client.subscribeStatus(() => render(client.status()))  // { online: false, pending: 3 }
+```
+
+- Each shape's rows are saved with their stream position (at most every 200 ms). After a reload the shape is `ready` with the saved rows at once, and the stream resumes from that position instead of loading everything again. A must-refetch from the server drops the saved rows.
+- Every unconfirmed mutation is saved until the server confirms or refuses it. A reload restores them in order, shows them again and sends them with the same ids, so the server applies each once even if the first session's request did get through.
+- Saved data belongs to the user who was signed in (`userId()` when the client was created). Another user on the same browser starts empty and sends nothing of the first user's. When the user changes, create a new client: the old one stops saving as soon as `userId()` returns someone else. On sign-out, `await client.clearStorage()` deletes everything saved, for every user, so nothing stays behind on a shared device.
+- A shape is saved whole each time it changes (at most every 200 ms), which is cheap for the few thousand rows a screen usually shows. For much larger shapes, narrow the rule or leave such a shape out of a client with storage.
+- `status()` says whether the server answered the last request or stream poll and how many changes wait for it. A browser `online` event retries at once instead of waiting out the backoff.
+- `client.saved()` resolves when everything is written, for tests or before closing a tab on purpose.
+
+The page itself still comes from the server: to open the app with no connection at all, cache it with a service worker (not part of Bolide). Tabs of one origin share the storage. Two tabs opened at once can both send the same saved mutation; the mutation id makes that harmless. `memoryStorage()` keeps everything in a `Map`, for tests. Any other store fits the `ClientStorage` interface (`get`, `set`, `delete`, `list(prefix)`); values must survive `structuredClone`.
+
+Not yet: queries across shapes.

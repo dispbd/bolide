@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createApp, createLogger, defineModule, defineService } from '@bolide/core'
-import { defineShape, defineTable, t, type ShapeRow } from '../src/index.ts'
+import { defineShape, defineTable, query, t, type ShapeRow } from '../src/index.ts'
 import { dataModule, electric, whereSql, type SqlClient } from '../src/server/index.ts'
 
 const users = defineTable('users', { id: t.uuid().primaryKey(), email: t.text(), passwordHash: t.text() })
@@ -38,6 +38,30 @@ describe('shapes', () => {
     // Fail closed: a rule like { ownerId: userId } without a user must not stream the whole table.
     assert.throws(() => whereSql(todos, { ownerId: undefined }), /todos.ownerId is undefined. Return false/)
     assert.throws(() => whereSql(todos, { constructor: 'x' } as never), /no column "constructor"/)
+  })
+
+  test('query() reads another table in a subquery and names it as a dependency', () => {
+    const lists = defineTable('lists', { id: t.uuid().primaryKey(), teamId: t.uuid(), archived: t.boolean() })
+    const members = defineTable('members', { id: t.uuid().primaryKey(), listId: t.uuid(), userId: t.uuid() })
+    const shared = defineTable('shared', { id: t.uuid().primaryKey(), listId: t.uuid(), done: t.boolean() })
+    assert.deepEqual(whereSql(shared, { done: false, listId: { in: query(members, 'listId', { userId: 'u1' }) } }), {
+      sql: '"done" = $1 and "list_id" in (select _q1."list_id" from "members" _q1 where _q1."user_id" = $2)',
+      params: ['false', 'u1'],
+      deps: [{ table: 'members', where: { sql: '"user_id" = $1', params: ['u1'] } }],
+    })
+    // Nested: lists of my teams that aren't archived.
+    const nested = whereSql(shared, { listId: { in: query(lists, 'id', { archived: false, teamId: { in: query(members, 'listId', { userId: 'u1' }) } }) } })
+    assert.equal(nested.sql, '"list_id" in (select _q1."id" from "lists" _q1 where _q1."archived" = $1 and _q1."team_id" in (select _q2."list_id" from "members" _q2 where _q2."user_id" = $2))')
+    assert.deepEqual(nested.params, ['false', 'u1'])
+    assert.deepEqual(
+      nested.deps!.map((d) => [d.table, d.where.sql]),
+      [
+        ['lists', '"archived" = $1 and "team_id" in (select _q1."list_id" from "members" _q1 where _q1."user_id" = $2)'],
+        ['members', '"user_id" = $1'],
+      ],
+    )
+    assert.throws(() => query(members, 'nope' as never), /query\(members\): no column "nope"/)
+    assert.throws(() => whereSql(shared, { listId: { in: query(members, 'listId', { userId: undefined }) } }), /members.userId is undefined/)
   })
 
   test('electric() asks for the shape the server decided, with the browser\'s protocol params only', async () => {
@@ -94,6 +118,10 @@ describe('shapes', () => {
     assert.throws(() => dataModule({ sql, tables: [todos], mutators: [], shapes: [mine] }), /shapes need a sync source/)
     assert.throws(() => dataModule({ sql, tables: [todos], mutators: [], shapes: [people], sync }), /reads table "users", which is not in/)
     assert.throws(() => dataModule({ sql, tables: [todos], mutators: [], shapes: [mine, mine], sync }), /two shapes are named "todos.mine"/)
+    // A rule that reads another table needs a source that follows it.
+    const ofMine = defineShape('users.ofmine', users, { where: ({ userId }) => (userId ? { id: { in: query(todos, 'ownerId', { ownerId: userId }) } } : false) })
+    assert.throws(() => dataModule({ sql, tables: [todos, users], mutators: [], shapes: [ofMine], sync }), /"users.ofmine" reads todos through query\(\), which this sync source doesn't follow/)
+    assert.ok(dataModule({ sql, tables: [todos, users], mutators: [], shapes: [ofMine], sync: { subqueries: true, fetchShape: async () => new Response() } }))
   })
 })
 

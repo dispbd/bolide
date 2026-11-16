@@ -13,7 +13,8 @@ import {
   type MutatorTx,
   type ShapeRow,
 } from '@bolide/data'
-import type { SyncChange, SyncTransport } from './transport.ts'
+import type { ClientStorage } from './storage.ts'
+import type { SyncChange, SyncPosition, SyncTransport } from './transport.ts'
 import { matches } from './where.ts'
 
 type Rows = Map<string, Record<string, unknown>>
@@ -75,6 +76,32 @@ export interface ClientOptions {
   retry?: { initial?: number; max?: number }
   /** Called for every rejected mutation, also the ones nobody awaits. */
   onRejected?: (mutation: Mutation, error: MutationRejected) => void
+  /**
+   * Keeps synced rows and unsent mutations across reloads (offline mode): `indexedDbStorage()` from
+   * `@bolide/client/idb` in the browser. Saved data is kept per user id: when the user changes, create a new
+   * client (this one stops saving), and call `clearStorage()` on sign-out.
+   */
+  storage?: ClientStorage
+  /** Called when the storage fails; the client keeps working from memory. Default: `console.warn`. */
+  onStorageError?: (error: unknown) => void
+}
+
+/** The client as a whole: whether the server answers, and how many changes it hasn't confirmed yet. */
+export interface ClientStatus {
+  readonly online: boolean
+  readonly pending: number
+}
+
+interface SavedShape {
+  columns: string[]
+  rows: Record<string, unknown>[]
+  position: SyncPosition
+}
+
+interface SavedMutation {
+  id: string
+  name: string
+  input: unknown
 }
 
 interface PendingMutation {
@@ -86,6 +113,8 @@ interface PendingMutation {
   status: MutationStatus
   handle: Mutation
   settle: { resolve: () => void; reject: (e: MutationRejected) => void }
+  /** Orders saved mutations: when it was made, then a counter. */
+  savedAt: string
 }
 
 type Op = { table: AnyTable; type: 'put'; key: string; row: Record<string, unknown> } | { table: AnyTable; type: 'delete'; key: string }
@@ -97,8 +126,12 @@ interface ShapeState {
   listeners: Set<() => void>
   view: readonly Record<string, unknown>[]
   stop?: () => void
+  /** Restoring saved rows before the stream starts. */
+  starting?: boolean
   ready: Promise<void>
   markReady: () => void
+  saveTimer?: ReturnType<typeof setTimeout>
+  position?: SyncPosition
 }
 
 const closedError = () => new MutationRejected('the client was closed before the server confirmed this change', 0, 'closed')
@@ -129,6 +162,36 @@ export function createClient(options: ClientOptions) {
   let view = new Map<string, Rows>()
   const seenTxids = new Set<string>()
   const txidWaiters = new Map<string, () => void>()
+
+  // ---- status and storage ----
+
+  let status: ClientStatus = { online: true, pending: 0 }
+  const statusListeners = new Set<() => void>()
+  function setStatus(patch: Partial<ClientStatus>) {
+    const next = { ...status, ...patch }
+    if (next.online === status.online && next.pending === status.pending) return
+    status = next
+    for (const l of statusListeners) l()
+  }
+  const unconfirmed = () => pending.filter((p) => p.status === 'pending' || p.status === 'sent').length
+
+  const storage = options.storage
+  const onStorageError = options.onStorageError ?? ((e: unknown) => console.warn('bolide: client storage failed', e))
+  // Saved data belongs to the user who was signed in when the client started.
+  const scope = encodeURIComponent(userId() ?? '')
+  const shapeKey = (name: string) => `shape:${scope}:${name}`
+  const mutationPrefix = `mutation:${scope}:`
+  let mutationSeq = 0
+  /** Each mutation is its own entry, so tabs sharing the storage never overwrite each other's. */
+  const mutationKey = (p: PendingMutation) => `${mutationPrefix}${p.savedAt}:${p.id}`
+  let writes = Promise.resolve()
+  let cleared = false
+  /** Saves under this user's key; deletes (which only remove this user's own data) go through after a change of user too. */
+  const write = (fn: (s: ClientStorage) => Promise<void>, kind: 'set' | 'delete' = 'set') => {
+    // Another user signed in (or this one signed out): their data must not land under this user's key.
+    if (!storage || cleared || (kind === 'set' && encodeURIComponent(userId() ?? '') !== scope)) return
+    writes = writes.then(() => fn(storage)).catch(onStorageError)
+  }
 
   // ---- local store ----
 
@@ -282,9 +345,6 @@ export function createClient(options: ClientOptions) {
       shapes.set(sh.name, s)
     }
     const state = s
-    const notify = () => {
-      for (const l of state.listeners) l()
-    }
     return {
       rows: () => state.view as readonly ShapeRow<S>[],
       get status() {
@@ -293,38 +353,14 @@ export function createClient(options: ClientOptions) {
       ready: state.ready,
       subscribe(listener) {
         state.listeners.add(listener)
-        if (!state.stop) {
-          state.stop = options.transport.subscribe(
-            { url: `${base}/shape/${encodeURIComponent(sh.name)}`, shape: sh, headers },
-            {
-              changes: (changes, txids) => applySync(state, changes, txids),
-              upToDate: () => {
-                if (state.status === 'ready') return
-                // After the rebuild that applySync queued, so `await ready` sees the first rows.
-                void rebuild().then(() => {
-                  if (state.status === 'ready' || !state.stop) return
-                  state.status = 'ready'
-                  state.markReady()
-                  notify()
-                })
-              },
-              reset: () => {
-                state.rows.clear()
-                void rebuild()
-              },
-              error: () => {
-                state.status = 'error'
-                notify()
-              },
-            },
-          )
-        }
+        if (!state.stop && !state.starting) start(state)
         return () => {
           state.listeners.delete(listener)
           // Wait a tick: a component that remounts at once (React StrictMode, a route change) keeps the stream.
           if (!state.listeners.size)
             setTimeout(() => {
               if (state.listeners.size || !state.stop) return
+              flushShapeSave(state)
               state.stop()
               state.stop = undefined
               state.rows.clear()
@@ -336,17 +372,111 @@ export function createClient(options: ClientOptions) {
     }
   }
 
+  function start(state: ShapeState) {
+    const sh = state.shape
+    const notify = () => {
+      for (const l of state.listeners) l()
+    }
+    const open = (resume?: SyncPosition) =>
+      options.transport.subscribe(
+        { url: `${base}/shape/${encodeURIComponent(sh.name)}`, shape: sh, headers, ...(resume ? { resume } : {}) },
+        {
+          changes: (changes, txids) => {
+            setStatus({ online: true })
+            applySync(state, changes, txids)
+          },
+          upToDate: () => {
+            setStatus({ online: true })
+            if (state.status === 'ready') return
+            // After the rebuild that applySync queued, so `await ready` sees the first rows.
+            void rebuild().then(() => {
+              if (state.status === 'ready' || !state.stop) return
+              state.status = 'ready'
+              state.markReady()
+              notify()
+            })
+          },
+          reset: () => {
+            state.rows.clear()
+            clearTimeout(state.saveTimer)
+            state.saveTimer = undefined
+            write((st) => st.delete(shapeKey(sh.name)), 'delete')
+            void rebuild()
+          },
+          error: () => {
+            state.status = 'error'
+            notify()
+          },
+          position: (position) => scheduleShapeSave(state, position),
+          offline: () => setStatus({ online: false }),
+        },
+      )
+    if (!storage) {
+      state.stop = open()
+      return
+    }
+    // Show the saved rows at once, then resume the stream where they were saved.
+    state.starting = true
+    void (async () => {
+      let resume: SyncPosition | undefined
+      try {
+        const saved = (await storage.get(shapeKey(sh.name))) as SavedShape | undefined
+        const columns = sh.columns as string[]
+        if (saved && !state.stop && saved.columns.join() === columns.join()) {
+          for (const row of saved.rows) state.rows.set(keyOf(sh.table, row), row)
+          resume = saved.position
+          await rebuild()
+          state.status = 'ready'
+          state.markReady()
+          notify()
+        }
+      } catch (e) {
+        onStorageError(e)
+      }
+      state.starting = false
+      if (closed) return
+      if (!state.listeners.size) {
+        state.rows.clear()
+        state.status = 'loading'
+        void rebuild()
+        return
+      }
+      state.stop = open(resume)
+    })()
+  }
+
+  /** Saves a shape's rows with its stream position, at most a few times a second. */
+  function scheduleShapeSave(state: ShapeState, position: SyncPosition) {
+    if (!storage) return
+    state.position = position
+    state.saveTimer ??= setTimeout(() => flushShapeSave(state), 200)
+  }
+  function flushShapeSave(state: ShapeState) {
+    if (!state.saveTimer || !state.position) return
+    clearTimeout(state.saveTimer)
+    state.saveTimer = undefined
+    const saved: SavedShape = { columns: [...(state.shape.columns as string[])], rows: [...state.rows.values()], position: state.position }
+    write((st) => st.set(shapeKey(state.shape.name), saved))
+  }
+
   // ---- mutations ----
 
   function mutate<M extends AnyMutator>(mutator: M, input: MutatorInput<M>): Mutation {
     if (mutators.get(mutator.name) !== mutator) throw new TypeError(`mutator "${mutator.name}" is not in createClient({ mutators }).`)
-    const id = crypto.randomUUID()
+    const { handle, step } = enqueue(mutator, input, crypto.randomUUID(), true)
+    chain = chain.then(step)
+    return handle
+  }
+
+  /** A mutation and the step that applies it locally and queues it; steps run in order on `chain`. */
+  function enqueue(mutator: AnyMutator, input: unknown, id: string, save: boolean) {
     let settle!: PendingMutation['settle']
     const done = new Promise<void>((resolve, reject) => (settle = { resolve, reject }))
     done.catch(() => {}) // the caller may not await it; onRejected still hears about it
     let markApplied!: () => void
     const applied = new Promise<void>((r) => (markApplied = r))
-    const p = { id, mutator, input, ops: [], status: 'pending', settle } as unknown as PendingMutation
+    const savedAt = `${Date.now().toString(36).padStart(10, '0')}-${(mutationSeq++).toString(36).padStart(6, '0')}`
+    const p = { id, mutator, input, ops: [], status: 'pending', settle, savedAt } as unknown as PendingMutation
     p.handle = {
       id,
       name: mutator.name,
@@ -356,7 +486,7 @@ export function createClient(options: ClientOptions) {
       applied,
       done,
     }
-    chain = chain.then(async () => {
+    const step = async () => {
       try {
         if (closed) throw closedError()
         p.input = await checkInput(mutator, input)
@@ -368,6 +498,11 @@ export function createClient(options: ClientOptions) {
           view = working
         }
         pending.push(p)
+        if (save) {
+          const saved: SavedMutation = { id, name: mutator.name, input: p.input }
+          write((st) => st.set(mutationKey(p), saved))
+        }
+        setStatus({ pending: unconfirmed() })
         publish()
         void flush()
       } catch (e) {
@@ -375,12 +510,34 @@ export function createClient(options: ClientOptions) {
       } finally {
         markApplied()
       }
+    }
+    return { p, handle: p.handle, step }
+  }
+
+  // Unsent mutations from the last session go first, before anything this session adds.
+  if (storage) {
+    const loaded = storage.list(mutationPrefix).catch((e: unknown) => (onStorageError(e), [] as [string, unknown][]))
+    chain = chain.then(async () => {
+      for (const [key, value] of await loaded) {
+        const saved = value as SavedMutation
+        const mutator = mutators.get(saved.name)
+        // The app no longer has this mutator: nothing can send it.
+        if (!mutator) {
+          write((st) => st.delete(key), 'delete')
+          continue
+        }
+        const { p, step } = enqueue(mutator, saved.input, saved.id, false)
+        p.savedAt = key.slice(mutationPrefix.length, key.length - saved.id.length - 1)
+        await step()
+      }
     })
-    return p.handle
   }
 
   function reject(p: PendingMutation, error: MutationRejected) {
     p.status = 'rejected'
+    // A closed client keeps its saved mutations: the next session sends them.
+    if (error.code !== 'closed') write((st) => st.delete(mutationKey(p)), 'delete')
+    if (!closed) setStatus({ pending: unconfirmed() })
     p.settle.reject(error)
     options.onRejected?.(p.handle, error)
   }
@@ -388,6 +545,8 @@ export function createClient(options: ClientOptions) {
   function finish(p: PendingMutation) {
     const i = pending.indexOf(p)
     if (i >= 0) pending.splice(i, 1)
+    if (p.status === 'confirmed') write((st) => st.delete(mutationKey(p)), 'delete')
+    setStatus({ pending: unconfirmed() })
     return rebuild()
   }
 
@@ -416,10 +575,12 @@ export function createClient(options: ClientOptions) {
             body: JSON.stringify({ id: p.id, name: p.mutator.name, input: p.input }),
           })
         } catch {
+          setStatus({ online: false })
           await nap(delay) // offline or the server is restarting: same mutation again, in order
           delay = Math.min(delay * 2, retryMax)
           continue
         }
+        setStatus({ online: true })
         if (res.status >= 500 || res.status === 429 || res.status === 408) {
           await res.body?.cancel().catch(() => {})
           await nap(delay)
@@ -443,6 +604,12 @@ export function createClient(options: ClientOptions) {
       flushing = false
     }
   }
+
+  // The browser says the network is back: retry now instead of waiting out the backoff.
+  const onOnline = () => {
+    for (const wake of [...naps]) wake()
+  }
+  globalThis.addEventListener?.('online', onOnline)
 
   async function confirm(p: PendingMutation, txid: string | undefined) {
     const synced = new Set([...shapes.values()].filter((s) => s.stop).map((s) => s.shape.table))
@@ -471,9 +638,37 @@ export function createClient(options: ClientOptions) {
     shape,
     /** Mutations not yet confirmed, oldest first. */
     pending: () => pending.map((p) => p.handle) as readonly Mutation[],
+    /** Whether the server answers, and how many changes wait for it. The same object until one of them changes. */
+    status: () => status,
+    /** Called when `status()` changes. Returns a function that unsubscribes. */
+    subscribeStatus(listener: () => void) {
+      statusListeners.add(listener)
+      return () => void statusListeners.delete(listener)
+    },
+    /** Resolves when everything the client meant to save is in storage. */
+    saved: async () => {
+      for (const s of shapes.values()) flushShapeSave(s)
+      await writes
+    },
+    /**
+     * Deletes everything saved in the storage, for every user, and stops this client from saving more. For
+     * sign-out on a shared device: then close the client and create one for the next user.
+     */
+    async clearStorage() {
+      cleared = true
+      for (const s of shapes.values()) {
+        clearTimeout(s.saveTimer)
+        s.saveTimer = undefined
+      }
+      await writes
+      if (!storage) return
+      for (const [key] of await storage.list('')) if (key.startsWith('shape:') || key.startsWith('mutation:')) await storage.delete(key)
+    },
     /** Stops every shape stream and stops sending. Unconfirmed mutations reject with code `closed`. */
     close() {
       closed = true
+      globalThis.removeEventListener?.('online', onOnline)
+      for (const s of shapes.values()) flushShapeSave(s)
       // Unconfirmed mutations end here: `done` must neither hang nor claim a sync that didn't happen.
       for (const p of pending.splice(0)) {
         if (p.status === 'rejected' || p.status === 'confirmed') continue

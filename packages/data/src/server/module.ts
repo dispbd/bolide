@@ -101,7 +101,22 @@ export function dataModule(options: DataModuleOptions): Module {
     if (!tables.has(sh.table)) throw new BolideError(`dataModule: shape "${sh.name}" reads table "${sh.table.name}", which is not in dataModule({ tables }).`)
     shapes.set(sh.name, sh)
   }
-  if (shapes.size && !options.sync) throw new BolideError('dataModule: shapes need a sync source. Pass sync: electric({ url: process.env.ELECTRIC_URL }).')
+  if (shapes.size && !options.sync) throw new BolideError('dataModule: shapes need a sync source. Pass sync: replicationSync(sql, { url }), postgresSync(sql) or electric({ url }).')
+  // Try each rule with and without a user, to learn the other tables it reads before the first request.
+  const syncTables = new Set([...shapes.values()].map((sh) => sh.table.name))
+  for (const sh of shapes.values())
+    for (const userId of [undefined, '00000000-0000-4000-8000-000000000000']) {
+      let deps: { table: string }[] = []
+      try {
+        const where = sh.where({ userId })
+        if (where !== false) deps = whereSql(sh.table, where).deps ?? []
+      } catch {
+        continue // the request will report it
+      }
+      if (deps.length && !options.sync?.subqueries)
+        throw new BolideError(`dataModule: shape "${sh.name}" reads ${deps[0]!.table} through query(), which this sync source doesn't follow. Use replicationSync() or postgresSync().`)
+      for (const d of deps) syncTables.add(d.table)
+    }
   const prefix = (options.prefix ?? '/api/data').replace(/\/$/, '')
   if (!prefix.startsWith('/')) throw new BolideError(`dataModule prefix must start with "/", got "${options.prefix}".`)
 
@@ -119,6 +134,19 @@ export function dataModule(options: DataModuleOptions): Module {
     // Idempotency records: one row per applied mutation id, with its txid.
     onInit: async (sql) => {
       await sql.unsafe(`create table if not exists bolide_mutations (id uuid primary key, name text not null, txid text, created_at timestamptz not null default now())`)
+    },
+  })
+
+  // The sync source starts with the app, so a database that can't serve shapes fails at boot.
+  const sync = options.sync
+  const Sync = defineService({
+    name: 'data sync',
+    factory: () => sync,
+    onInit: async () => {
+      if (shapes.size) await sync?.start?.([...syncTables])
+    },
+    onDestroy: async () => {
+      if (shapes.size) await sync?.close?.()
     },
   })
 
@@ -162,8 +190,8 @@ export function dataModule(options: DataModuleOptions): Module {
   const shape = defineRoute({
     method: 'GET',
     path: `${prefix}/shape/:name`,
-    inject: { userId: options.userId ?? NoUser, log: Log },
-    handler: async ({ request, params }, { userId, log }) => {
+    inject: { userId: options.userId ?? NoUser, log: Log, sync: Sync },
+    handler: async ({ request, params }, { userId, log, sync }) => {
       const sh = shapes.get(params.name)
       if (!sh) throw new HttpError(404, `no shape "${params.name}"`, undefined, 'unknown_shape')
       let where = sh.where({ userId })
@@ -175,7 +203,7 @@ export function dataModule(options: DataModuleOptions): Module {
         where = false
       }
       if (where === false) throw new HttpError(userId === undefined ? 401 : 403, `shape "${sh.name}" is not readable here`)
-      return options.sync!.fetchShape({
+      return sync!.fetchShape({
         table: sh.table.name,
         columns: shapeColumns(sh),
         where: whereSql(sh.table, where),
@@ -185,6 +213,6 @@ export function dataModule(options: DataModuleOptions): Module {
     },
   })
 
-  const providers: AnyService[] = [Setup, allDeps, ...Object.values(serverDeps), ...(given ? [] : [sqlToken]), ...(options.userId ? [] : [NoUser])]
+  const providers: AnyService[] = [Setup, Sync, allDeps, ...Object.values(serverDeps), ...(given ? [] : [sqlToken]), ...(options.userId ? [] : [NoUser])]
   return defineModule({ name: 'data', providers, routes: shapes.size ? [mutate, shape] : [mutate] })
 }

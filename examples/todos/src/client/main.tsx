@@ -1,5 +1,6 @@
 import { createClient } from '@bolide/client'
 import { electricTransport } from '@bolide/client/electric'
+import { indexedDbStorage } from '@bolide/client/idb'
 import { BolideProvider } from '@bolide/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -13,6 +14,8 @@ const client = createClient({
   transport: electricTransport(),
   mutators,
   userId: () => userId,
+  // A reload shows the last rows at once, and changes made offline are sent when the server is back.
+  storage: indexedDbStorage(),
   onRejected: (m, e) => console.warn(`${m.name} was refused: ${e.message}`),
 })
 

@@ -21,21 +21,18 @@ import {
   dataModule,
   devSyncSql,
   postgresSync,
+  replicationSync,
   schemaSql,
 } from "@bolide/data/server";
-import { createClient, MutationRejected } from "../../src/index.ts";
+import { createClient, memoryStorage, MutationRejected, type ClientStorage } from "../../src/index.ts";
 import { electricTransport } from "../../src/electric.ts";
 
 // The whole loop on Postgres alone: browser client → mutate route → transaction → change log → shape stream → client.
 const url =
   process.env.DATABASE_URL ??
   "postgres://postgres:postgres@localhost:54321/bolide";
-const schema = `bolide_e2e_${process.pid}`;
 const admin = postgres(url, { onnotice: () => {} });
-const sql = postgres(url, {
-  onnotice: () => {},
-  connection: { search_path: schema },
-});
+after(() => admin.end());
 
 const todos = defineTable("todos", {
   id: t.uuid().primaryKey(),
@@ -75,7 +72,15 @@ const UserId = defineService({
   factory: ({ request }) => request.headers.get("x-user") ?? undefined,
 });
 
-describe("end to end on Postgres", () => {
+// The same loop on both Postgres-only sources.
+for (const source of ["postgresSync", "replicationSync"] as const)
+describe(`end to end on Postgres (${source})`, () => {
+  const schema = `bolide_e2e_${source.toLowerCase()}_${process.pid}`;
+  const slot = `bolide_e2e_${process.pid}`;
+  const sql = postgres(url, {
+    onnotice: () => {},
+    connection: { search_path: schema },
+  });
   let app: App;
   before(async () => {
     await admin.unsafe(`create schema ${schema}`);
@@ -93,7 +98,10 @@ describe("end to end on Postgres", () => {
           tables: [todos],
           mutators: [create, rename],
           shapes: [mine],
-          sync: postgresSync(sql, { longPoll: 2000 }),
+          sync:
+            source === "postgresSync"
+              ? postgresSync(sql, { longPoll: 2000 })
+              : replicationSync(sql, { url, slot, publication: slot, longPoll: 2000 }),
           userId: UserId,
         }),
       ],
@@ -104,12 +112,17 @@ describe("end to end on Postgres", () => {
     await app?.close();
     await sql.end();
     await admin.unsafe(`drop schema if exists ${schema} cascade`);
-    await admin.end();
+    if (source === "replicationSync") {
+      await admin.unsafe(`select pg_drop_replication_slot($1) from pg_replication_slots where slot_name = $1`, [slot]);
+      await admin.unsafe(`drop publication if exists ${slot}`);
+    }
   });
 
-  const browser = (user: string) => {
+  const browser = (user: string, storage?: ClientStorage) => {
+    const requests: URL[] = [];
     const fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(new URL(String(input), "http://app.test"), init);
+      requests.push(new URL(req.url));
       req.headers.set("x-user", user);
       return app.fetch(req);
     }) as typeof globalThis.fetch;
@@ -119,11 +132,12 @@ describe("end to end on Postgres", () => {
       userId: () => user,
       fetch,
       confirmTimeout: 5000,
+      ...(storage ? { storage } : {}),
     });
     const view = client.shape(mine);
     const changes: (readonly unknown[])[] = [];
     view.subscribe(() => changes.push(view.rows()));
-    return { client, view, changes };
+    return { client, view, changes, requests };
   };
   const until = async (check: () => boolean, what: string) => {
     for (let i = 0; i < 200 && !check(); i++)
@@ -195,6 +209,37 @@ describe("end to end on Postgres", () => {
     } finally {
       for (const b of [tab1, tab2, other]) b.client.close()
       // Let aborted long-polls finish before the app and the database close.
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  });
+
+  test("a reload shows the saved rows and resumes the stream, which brings what changed meanwhile", async () => {
+    const ann = crypto.randomUUID();
+    const storage = memoryStorage();
+    const first = browser(ann, storage);
+    const id = crypto.randomUUID();
+    try {
+      await first.view.ready;
+      await first.client.mutate(create, { id, title: "Saved" }).done;
+      await until(() => first.requests.some((u) => u.searchParams.get("offset") !== "-1"), "the stream moved past the first load");
+      await new Promise((r) => setTimeout(r, 250));
+      await first.client.saved();
+    } finally {
+      first.client.close();
+    }
+    // Meanwhile, from another device.
+    const other = crypto.randomUUID();
+    await sql.unsafe(`insert into todos (id, title, owner_id) values ($1, 'Elsewhere', $2)`, [other, ann]);
+
+    const second = browser(ann, storage);
+    try {
+      await second.view.ready;
+      assert.deepEqual(second.view.rows().map((r) => (r as { title: string }).title), ["Saved"], "from storage");
+      await until(() => second.view.rows().length === 2, "the change made elsewhere arrives");
+      const shapeRequests = second.requests.filter((u) => u.pathname.includes("/shape/"));
+      assert.ok(shapeRequests.length > 0 && shapeRequests.every((u) => u.searchParams.get("offset") !== "-1"), "resumed, not loaded again");
+    } finally {
+      second.client.close();
       await new Promise((r) => setTimeout(r, 100));
     }
   });

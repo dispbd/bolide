@@ -1,5 +1,5 @@
 import type { ColumnDef } from '../columns.ts'
-import type { AnyShape, Where } from '../shape.ts'
+import { isQuery, type AnyShape, type Where } from '../shape.ts'
 import type { AnyTable } from '../table.ts'
 
 type Def = ColumnDef & { sqlName: string }
@@ -9,6 +9,11 @@ export interface WhereSql {
   /** SQL with `$1`, `$2`... placeholders, or `''` for every row. */
   sql: string
   params: string[]
+  /**
+   * The other tables a `query(...)` reads, each with its own conditions. A change to one of their rows that
+   * matches may change which rows the shape has, so sync sources make its clients load it again.
+   */
+  deps?: { table: string; where: WhereSql }[]
 }
 
 const ops = { ne: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' } as const
@@ -21,8 +26,14 @@ const text = (v: unknown) => String(v)
  * and every value is a parameter.
  */
 export function whereSql(table: AnyTable, where: Where<AnyTable>): WhereSql {
-  const parts: string[] = []
   const params: string[] = []
+  const deps: NonNullable<WhereSql['deps']> = []
+  const sql = build(table, where, params, deps, '', 0)
+  return deps.length ? { sql, params, deps } : { sql, params }
+}
+
+function build(table: AnyTable, where: Where<AnyTable>, params: string[], deps: NonNullable<WhereSql['deps']>, alias: string, depth: number): string {
+  const parts: string[] = []
   const param = (def: Def, v: unknown) => {
     if (v === undefined) throw new TypeError(`where on ${table.name}: a value is undefined; leave the key out instead.`)
     params.push(text(v))
@@ -35,22 +46,31 @@ export function whereSql(table: AnyTable, where: Where<AnyTable>): WhereSql {
     if (!def) throw new TypeError(`where on ${table.name}: no column "${key}".`)
     // Sync engines filter on scalar columns; JSON filters belong in a column of their own.
     if (def.kind === 'json') throw new TypeError(`where on ${table.name}.${key}: json columns can't be filtered on.`)
-    const col = q(def.sqlName)
+    const col = alias + q(def.sqlName)
     if (cond === null) parts.push(`${col} is null`)
     else if (typeof cond === 'object') {
       const entries = Object.entries(cond as Record<string, unknown>)
       if (entries.length !== 1) throw new TypeError(`where on ${table.name}.${key}: use one of in, ne, gt, gte, lt, lte per column.`)
       const [op, v] = entries[0]!
-      if (op === 'in') {
+      if (op === 'in' && isQuery(v)) {
+        if (depth >= 3) throw new TypeError(`where on ${table.name}.${key}: query() nests at most 3 deep.`)
+        const sub = `_q${depth + 1}`
+        const subDef = v.table.columns[v.column] as Def
+        const inner = build(v.table, v.where, params, [], `${sub}.`, depth + 1)
+        parts.push(`${col} in (select ${sub}.${q(subDef.sqlName)} from ${q(v.table.name)} ${sub}${inner ? ` where ${inner}` : ''})`)
+        // Standalone, with its own parameters: sources run it on the other table's changed rows.
+        const own = whereSql(v.table, v.where)
+        deps.push({ table: v.table.name, where: { sql: own.sql, params: own.params } }, ...(own.deps ?? []))
+      } else if (op === 'in') {
         const list = v as unknown[]
-        if (!Array.isArray(list)) throw new TypeError(`where on ${table.name}.${key}: "in" takes an array.`)
+        if (!Array.isArray(list)) throw new TypeError(`where on ${table.name}.${key}: "in" takes an array or a query().`)
         parts.push(list.length ? `${col} in (${list.map((x) => param(def, x)).join(', ')})` : 'false')
       } else if (op === 'ne' && v === null) parts.push(`${col} is not null`)
       else if (op in ops) parts.push(`${col} ${ops[op as keyof typeof ops]} ${param(def, v)}`)
       else throw new TypeError(`where on ${table.name}.${key}: unknown operator "${op}".`)
     } else parts.push(`${col} = ${param(def, cond)}`)
   }
-  return { sql: parts.join(' and '), params }
+  return parts.join(' and ')
 }
 
 /** Where shapes come from. Electric is the production source; tests can pass their own. */
@@ -59,6 +79,8 @@ export interface SyncSource {
   fetchShape(request: { table: string; columns: string[]; where: WhereSql; protocol: URLSearchParams; signal: AbortSignal }): Promise<Response>
   /** Called at boot with the tables of every shape, so a setup mistake fails there and not at the first request. */
   start?(tables: string[]): Promise<void>
+  /** Whether it follows rules that read other tables (`query(...)`); `dataModule` refuses such shapes at boot otherwise. */
+  readonly subqueries?: boolean
   /** Called on shutdown. */
   close?(): Promise<void>
 }
@@ -81,6 +103,8 @@ export function electric(options: ElectricOptions): SyncSource {
   const doFetch = options.fetch ?? fetch
   return {
     async fetchShape({ table, columns, where, protocol, signal }) {
+      // Electric wouldn't notice when the other table changes, so the shape would silently go stale.
+      if (where.deps?.length) throw new Error(`electric(): the rule for ${table} reads other tables with query(), which Electric doesn't follow. Use replicationSync() or postgresSync().`)
       const url = new URL('/v1/shape', options.url)
       for (const p of PROTOCOL) {
         const v = protocol.get(p)

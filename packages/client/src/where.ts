@@ -1,4 +1,4 @@
-import type { AnyTable, ColumnDef, Condition, Where } from '@bolide/data'
+import { isQuery, type AnyTable, type ColumnDef, type Condition, type Where } from '@bolide/data'
 
 type Kind = ColumnDef['kind']
 
@@ -17,6 +17,8 @@ function test(kind: Kind | undefined, value: unknown, cond: Condition<unknown>):
   const [op, v] = Object.entries(cond)[0] as [string, unknown]
   if (op === 'ne') return v === null ? value !== null && value !== undefined : value !== null && value !== undefined && compare(kind, value, v) !== 0
   if (value === null || value === undefined) return false
+  // The other table may not be here: show the user's own pending change, and let the server's answer decide.
+  if (op === 'in' && isQuery(v)) return true
   if (op === 'in') return (v as unknown[]).some((x) => compare(kind, value, x) === 0)
   const c = compare(kind, value, v)
   return op === 'gt' ? c > 0 : op === 'gte' ? c >= 0 : op === 'lt' ? c < 0 : c <= 0

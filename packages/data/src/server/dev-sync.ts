@@ -97,16 +97,36 @@ export function postgresSync(sql: ListeningSqlClient, options: PostgresSyncOptio
     )) as unknown as ChangeRow[]
   }
 
-  /** Starts listening for a change to `table` now; `promise` settles on one, on timeout or on abort. */
-  function waiter(table: string, signal: AbortSignal) {
-    const set = waiters.get(table) ?? new Set()
-    waiters.set(table, set)
-    return wait(set, signal, longPoll)
+  /** Starts listening for a change to `tables` now; `promise` settles on one, on timeout or on abort. */
+  function waiter(tables: string[], signal: AbortSignal) {
+    const sets = tables.map((table) => {
+      const set = waiters.get(table) ?? new Set()
+      waiters.set(table, set)
+      return set
+    })
+    return wait(sets, signal, longPoll)
+  }
+
+  /** Whether a row that a `query(...)` of the rule reads changed after `offset`: then the shape's rows may have. */
+  async function depsChanged(where: WhereSql, offset: number) {
+    for (const dep of where.deps ?? []) {
+      const cond = dep.where.sql || 'true'
+      const n = dep.where.params.length
+      const matches = (col: string) => `(c.${col} is not null and exists (select 1 from jsonb_populate_record(null::${q(dep.table)}, c.${col}) where ${cond}))`
+      const [hit] = await sql.unsafe(
+        `select 1 from bolide_changes c where c.table_name = $${n + 1} and c.id > $${n + 2} and (${matches('new')} or ${matches('old')}) limit 1`,
+        [...dep.where.params, dep.table, offset],
+      )
+      if (hit) return true
+    }
+    return false
   }
 
   return {
+    subqueries: true,
     async fetchShape({ table, columns, where, protocol, signal }) {
-      await install(table)
+      const deps = [...new Set((where.deps ?? []).map((d) => d.table))]
+      for (const t of [table, ...deps]) await install(t)
       await listen()
       const handle = `dev-${hash(`${table}|${columns.join(',')}|${where.sql}|${where.params.join('\u0000')}`)}`
       const json = shapeResponse(handle)
@@ -137,11 +157,19 @@ export function postgresSync(sql: ListeningSqlClient, options: PostgresSyncOptio
       if (offset < Number(seq) - 1 && (first === null ? offset < Number(seq) : offset < Number(first) - 1)) return json(mustRefetch, {}, 409)
 
       // Listen before reading, so a change committed between the read and the wait still wakes this request.
-      const woken = live ? waiter(table, signal) : undefined
+      const woken = live ? waiter([table, ...deps], signal) : undefined
+      // A table the rule reads changed in a way that matters: which rows the shape has may differ now.
+      if (await depsChanged(where, offset)) {
+        woken?.cancel()
+        return json(mustRefetch, {}, 409)
+      }
       let changes = await changesAfter(table, where, offset)
       if (!changes.length && woken) {
         await woken.promise
-        if (!signal.aborted) changes = await changesAfter(table, where, offset)
+        if (!signal.aborted) {
+          if (await depsChanged(where, offset)) return json(mustRefetch, {}, 409)
+          changes = await changesAfter(table, where, offset)
+        }
       }
       woken?.cancel()
       const messages: unknown[] = []

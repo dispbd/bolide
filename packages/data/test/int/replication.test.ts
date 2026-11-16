@@ -2,7 +2,8 @@ import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import postgres from 'postgres'
 import { defineShape, defineTable, t } from '../../src/index.ts'
-import { replicationSync, schemaSql, shapeColumns, whereSql, type SyncSource } from '../../src/server/index.ts'
+import { replicationSync, schemaSql, type SyncSource } from '../../src/server/index.ts'
+import { follower } from './follow.ts'
 
 const url = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:54321/bolide'
 const schema = `bolide_repl_${process.pid}`
@@ -23,47 +24,6 @@ const all = defineShape('items.all', items)
 const owned = (owner: string) => defineShape('items.owned', items, { where: () => ({ ownerId: owner }) })
 
 const open = (options: Partial<Parameters<typeof replicationSync>[1]> = {}) => replicationSync(sql, { url, slot, publication, longPoll: 300, ...options })
-
-type Msg = { key?: string; value?: Record<string, unknown>; headers: { operation?: string; control?: string; txids?: number[] } }
-
-/** A minimal shape client: loads, then follows the stream, keeping rows by key. */
-function follower(source: () => SyncSource, shape: ReturnType<typeof owned> | typeof all, userId?: string) {
-  const rule = shape.where({ userId })
-  const req = { table: shape.table.name, columns: shapeColumns(shape), where: whereSql(shape.table, rule === false ? {} : rule) }
-  const rows = new Map<string, Record<string, unknown>>()
-  const txids: number[] = []
-  let offset = '-1'
-  let handle = ''
-  async function poll(live = false) {
-    const protocol = new URLSearchParams({ offset, ...(handle ? { handle } : {}), ...(live ? { live: 'true' } : {}) })
-    const res = await source().fetchShape({ ...req, protocol, signal: AbortSignal.timeout(5000) })
-    if (res.status === 409) return 'must-refetch' as const
-    assert.equal(res.status, 200, await res.clone().text())
-    handle = res.headers.get('electric-handle')!
-    offset = res.headers.get('electric-offset')!
-    for (const m of (await res.json()) as Msg[]) {
-      if (m.headers.txids) txids.push(...m.headers.txids)
-      if (m.headers.operation === 'delete') rows.delete(m.key!)
-      else if (m.headers.operation) rows.set(m.key!, { ...rows.get(m.key!), ...m.value })
-    }
-    return res.headers.has('electric-up-to-date') ? ('up-to-date' as const) : ('more' as const)
-  }
-  return {
-    rows,
-    txids,
-    offset: () => offset,
-    poll,
-    /** Polls until up to date. */
-    async catchUp() {
-      for (let i = 0; i < 100; i++) {
-        const r = await poll()
-        if (r !== 'more') return r
-      }
-      throw new Error('never caught up')
-    },
-    titles: () => [...rows.values()].map((r) => r.title).sort(),
-  }
-}
 
 const dbTitles = async (where = 'true') => ((await sql.unsafe(`select title from items where ${where} order by title`)) as { title: string }[]).map((r) => r.title)
 /** Polls until the follower shows what the table (filtered by `where`) has now. */

@@ -31,10 +31,14 @@
     "node": ">=20.6"
   },
   "peerDependencies": {
-    "@bolide/core": "0.0.0"
+    "@bolide/core": "0.0.0",
+    "postgres": "^3.4.0"
   },
   "peerDependenciesMeta": {
     "@bolide/core": {
+      "optional": true
+    },
+    "postgres": {
       "optional": true
     }
   }

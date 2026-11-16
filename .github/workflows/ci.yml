@@ -45,6 +45,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # replicationSync reads the WAL; a service container can't take `-c wal_level=logical`, so set it and restart.
+      - name: Enable logical replication
+        run: |
+          psql "$DATABASE_URL" -c "alter system set wal_level = logical"
+          docker restart ${{ job.services.postgres.id }}
+          until pg_isready -h localhost -p 5432; do sleep 1; done
       - run: npm ci
       # The CLI's db commands load @bolide/data the way a project would, from dist.
       - run: npm run build

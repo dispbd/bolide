@@ -205,7 +205,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
   }
 
   /** Tells Postgres which WAL it may drop: everything before the oldest change still kept. */
-  function acknowledge() {
+  function acknowledge(replyRequested = false) {
     if (!stream) return
     let lsn = tx ? tx.lsn - 1n : seen > head ? seen : head
     for (const log of logs.values()) if (log.changes.length && log.changes[0]!.pos[0] - 1n < lsn) lsn = log.changes[0]!.pos[0] - 1n
@@ -216,6 +216,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     view.setBigUint64(9, lsn) // flushed: the slot keeps what comes after
     view.setBigUint64(17, lsn) // applied
     view.setBigInt64(25, BigInt(Date.now() - Date.UTC(2000, 0, 1)) * 1000n)
+    msg[33] = replyRequested ? 1 : 0 // ask for a keepalive with the server's position
     stream.write(msg)
   }
 
@@ -366,6 +367,7 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
     for (let attempt = 0; ; attempt++) {
       try {
         await connect()
+        await catchUp()
         break
       } catch (e) {
         const busy = /is active for PID/.test(String((e as Error)?.message))
@@ -382,6 +384,21 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       acknowledge()
     }, 10_000)
     ticker.unref?.()
+  }
+
+  /**
+   * Waits until the stream has read the WAL up to where it was at start. After a restart the server first
+   * sends again the changes since the last acknowledged position; a first load served before they are in
+   * the log would get them again afterwards (a past TRUNCATE would make every client load again).
+   */
+  async function catchUp() {
+    const [{ lsn }] = (await sql.unsafe(`select pg_current_wal_lsn()::text as lsn`)) as [{ lsn: string }]
+    const target = parseLsn(lsn)
+    for (const end = Date.now() + 10_000; Date.now() < end && !closed; ) {
+      if (seen >= target || head >= target) return
+      acknowledge(true)
+      await new Promise((r) => setTimeout(r, 20))
+    }
   }
 
   /** Starts once; a start that failed (the database was down at boot) is tried again by the next caller. */

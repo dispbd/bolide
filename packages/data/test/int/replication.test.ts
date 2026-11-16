@@ -168,6 +168,22 @@ describe('replicationSync on Postgres', () => {
     assert.equal(await g.poll(), 'must-refetch')
   })
 
+  test('after a restart, start() returns once the changes sent again are in the log', async () => {
+    // The truncate stays in the log, so the slot keeps it for the next start, which reads it again.
+    await sql.unsafe(`insert into items (id, owner_id, title) values (40, 'ann', 'kept')`)
+    await sql.unsafe(`truncate items`)
+    await sql.unsafe(`insert into items (id, owner_id, title) values (41, 'ann', 'after')`)
+    const f0 = follower(() => sync, all)
+    await settle(f0)
+    await sync.close!()
+    sync = open()
+    await sync.start!(['items'])
+    const f = follower(() => sync, all)
+    await f.catchUp()
+    assert.equal(await f.catchUp(), 'up-to-date', 'a first load right after start sees no old truncate')
+    assert.deepEqual(f.titles(), ['after'])
+  })
+
   test('a table that was missing on its first request is set up on the next', async () => {
     const later = defineTable('later', { id: t.integer().primaryKey(), ownerId: t.text(), title: t.text() })
     const f = follower(() => sync, defineShape('later.all', later))

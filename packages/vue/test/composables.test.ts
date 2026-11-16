@@ -6,7 +6,7 @@ import { renderToString } from 'vue/server-renderer'
 import { z } from 'zod'
 import { defineMutator, defineShape, defineTable, t } from '@bolide/data'
 import { createClient, type SyncSink } from '@bolide/client'
-import { bolide, useMutation, useRow, useShape } from '../src/index.ts'
+import { bolide, useClientStatus, useMutation, useRow, useShape } from '../src/index.ts'
 
 
 const todos = defineTable('todos', { id: t.uuid().primaryKey(), title: t.text() })
@@ -21,6 +21,7 @@ const wait = (ms = 0) => new Promise((r) => setTimeout(r, ms))
 function setup(answer: () => Response | Promise<Response> = () => Response.json({ txid: '1' })) {
   const sinks = new Map<string, SyncSink>()
   const client = createClient({
+    retry: { initial: 1, max: 2 },
     transport: { subscribe: ({ shape }, sink) => (sinks.set(shape.name, sink), () => void sinks.delete(shape.name)) },
     mutators: [add],
     confirmTimeout: 20,
@@ -76,6 +77,32 @@ describe('vue composables', () => {
     await nextTick()
     assert.equal(el.textContent, '- rejected forbidden')
     app.unmount()
+  })
+
+  test('useClientStatus shows a lost connection and the changes waiting for it', async () => {
+    let online = false
+    const { client } = setup(() => {
+      if (!online) throw new TypeError('fetch failed')
+      return Response.json({})
+    })
+    const Badge = defineComponent(() => {
+      const status = useClientStatus()
+      return () => h('p', `${status.value.online ? 'online' : 'offline'} ${status.value.pending}`)
+    })
+    const el = document.createElement('div')
+    const app = createApp(Badge).use(bolide(client))
+    app.mount(el as unknown as Element)
+    assert.equal(el.textContent, 'online 0')
+    client.mutate(add, { id: crypto.randomUUID(), title: 'x' })
+    await wait(5)
+    await nextTick()
+    assert.equal(el.textContent, 'offline 1')
+    online = true
+    await wait(10)
+    await nextTick()
+    assert.equal(el.textContent, 'online 0')
+    app.unmount()
+    client.close()
   })
 
   test('works in an effect scope outside components, and renders on the server as loading', async () => {

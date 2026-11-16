@@ -1,5 +1,5 @@
 import { createContext, createElement, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import type { Client, Mutation, MutationRejected, ShapeStatus } from '@bolide/client'
+import type { Client, ClientStatus, Mutation, MutationRejected, ShapeStatus } from '@bolide/client'
 import type { AnyMutator, AnyShape, MutatorInput, ShapeRow } from '@bolide/data'
 
 const ClientContext = createContext<Client | null>(null)
@@ -81,4 +81,11 @@ export function useMutation<M extends AnyMutator>(mutator: M): UseMutation<M> {
     setState({ status: 'idle' })
   }, [])
   return { ...state, mutate, reset }
+}
+
+/** Whether the server is reachable and how many changes it hasn't confirmed yet, e.g. for an "offline, 3 unsaved" badge. */
+export function useClientStatus(): ClientStatus {
+  const client = useClient()
+  const subscribe = useCallback((onChange: () => void) => client.subscribeStatus(onChange), [client])
+  return useSyncExternalStore(subscribe, client.status, client.status)
 }

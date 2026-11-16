@@ -34,6 +34,7 @@ const { mutate } = useMutation(toggle)
 - `useShape(shape)` returns `{ rows, status }` as read-only refs. `rows` is a `shallowRef` that gets a new array when something changes, so rows aren't made deeply reactive. A component streams the shape while it is mounted; server rendering shows the empty `loading` state. Outside components (in `app.runWithContext` with an effect scope), it streams until the scope stops.
 - `useRow(shape, id)` is a computed row by primary key; `id` can be a value, a ref or a getter.
 - `useMutation(mutator)` returns `{ mutate, status, error, reset }`. `mutate(input)` changes the local rows at once; `status` goes `pending`, then `confirmed` or `rejected` with a `MutationRejected` in `error`. A rejected change is already rolled back.
+- `useClientStatus()` is a read-only ref of `{ online, pending }`: whether the server answers and how many changes wait for it. See [offline mode](../client/README.md#offline).
 - `bolide(client)` installs the client app-wide; `provideClient(client)` provides it to one component's children. `useClient()` returns it.
 
 Vue 3.3 or later (a peer dependency).

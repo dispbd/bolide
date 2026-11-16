@@ -1,5 +1,5 @@
 import { computed, getCurrentInstance, hasInjectionContext, inject, onMounted, onScopeDispose, onUnmounted, provide, ref, shallowRef, toValue, type InjectionKey, type MaybeRefOrGetter, type Plugin, type Ref } from 'vue'
-import type { Client, Mutation, MutationRejected, ShapeStatus } from '@bolide/client'
+import type { Client, ClientStatus, Mutation, MutationRejected, ShapeStatus } from '@bolide/client'
 import type { AnyMutator, AnyShape, MutatorInput, ShapeRow } from '@bolide/data'
 
 const key: InjectionKey<Client> = Symbol('bolide client')
@@ -110,4 +110,25 @@ export function useMutation<M extends AnyMutator>(mutator: M): UseMutation<M> {
       error.value = undefined
     },
   }
+}
+
+/** Whether the server is reachable and how many changes it hasn't confirmed yet, e.g. for an "offline, 3 unsaved" badge. */
+export function useClientStatus(): Readonly<Ref<ClientStatus>> {
+  const client = useClient()
+  const status = shallowRef(client.status())
+  let off: (() => void) | undefined
+  const start = () => {
+    off = client.subscribeStatus(() => (status.value = client.status()))
+    status.value = client.status()
+  }
+  const stop = () => off?.()
+  // Like useShape: a component listens while mounted, so server rendering leaves nothing subscribed.
+  if (getCurrentInstance()) {
+    onMounted(start)
+    onUnmounted(stop)
+  } else {
+    start()
+    onScopeDispose(stop)
+  }
+  return status
 }

@@ -1,4 +1,4 @@
-import { isChangeMessage, isControlMessage, ShapeStream, type Message, type Row } from '@electric-sql/client'
+import { BackoffDefaults, isChangeMessage, isControlMessage, ShapeStream, type Message, type Offset, type Row } from '@electric-sql/client'
 import type { SyncChange, SyncTransport } from './transport.ts'
 
 export interface ElectricTransportOptions {
@@ -13,14 +13,16 @@ export interface ElectricTransportOptions {
  */
 export function electricTransport(options: ElectricTransportOptions = {}): SyncTransport {
   return {
-    subscribe({ url, headers }, sink) {
+    subscribe({ url, headers, resume }, sink) {
       const origin = options.origin ?? (typeof location === 'undefined' ? undefined : location.origin)
       const abort = new AbortController()
       const stream = new ShapeStream({
         signal: abort.signal,
         url: origin ? new URL(url, origin).toString() : url,
         headers: headers(),
+        ...(resume ? { offset: resume.offset as Offset, handle: resume.handle } : {}),
         ...(options.fetch ? { fetchClient: options.fetch } : {}),
+        backoffOptions: { ...BackoffDefaults, onFailedAttempt: () => sink.offline?.() },
         onError: (e) => {
           if (!abort.signal.aborted) sink.error(e)
         },
@@ -28,6 +30,7 @@ export function electricTransport(options: ElectricTransportOptions = {}): SyncT
       const unsubscribe = stream.subscribe((messages: Message<Row>[]) => {
         const changes: SyncChange[] = []
         const txids = new Set<string>()
+        let upToDate = false
         for (const m of messages) {
           if (isChangeMessage(m)) {
             changes.push({ type: m.headers.operation, row: m.value as Record<string, unknown> })
@@ -35,10 +38,15 @@ export function electricTransport(options: ElectricTransportOptions = {}): SyncT
           } else if (isControlMessage(m)) {
             if (changes.length) sink.changes(changes.splice(0), [...txids])
             if (m.headers.control === 'must-refetch') sink.reset()
-            else if (m.headers.control === 'up-to-date') sink.upToDate()
+            else if (m.headers.control === 'up-to-date') {
+              upToDate = true
+              sink.upToDate()
+            }
           }
         }
         if (changes.length) sink.changes(changes, [...txids])
+        const handle = stream.shapeHandle
+        if (upToDate && handle) sink.position?.({ offset: stream.lastOffset, handle })
       })
       return () => {
         unsubscribe()

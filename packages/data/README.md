@@ -148,6 +148,8 @@ dataModule({ sql, tables, mutators, shapes: [myTodos, directory], sync: electric
 
 ### Without Electric: logical replication
 
+Which source to use, with measurements: [ADR 0002](../../docs/adr/0002-sync-sources.md).
+
 `replicationSync(sql, { url })` reads Postgres's write-ahead log itself, so it needs no extra service and doesn't slow writers down. It needs `wal_level=logical` (Postgres 13 or later), like Electric:
 
 ```ts

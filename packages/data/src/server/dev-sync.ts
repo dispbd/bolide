@@ -107,15 +107,18 @@ export function postgresSync(sql: ListeningSqlClient, options: PostgresSyncOptio
     return wait(sets, signal, longPoll)
   }
 
-  /** Whether a row that a `query(...)` of the rule reads changed after `offset`: then the shape's rows may have. */
-  async function depsChanged(where: WhereSql, offset: number) {
+  /**
+   * Whether a row that a `query(...)` of the rule reads changed after `offset` (and up to `upTo`, the offset this
+   * answer gives back, so a change after it is left for the next request): then the shape's rows may have.
+   */
+  async function depsChanged(where: WhereSql, offset: number, upTo?: number) {
     for (const dep of where.deps ?? []) {
       const cond = dep.where.sql || 'true'
       const n = dep.where.params.length
       const matches = (col: string) => `(c.${col} is not null and exists (select 1 from jsonb_populate_record(null::${q(dep.table)}, c.${col}) where ${cond}))`
       const [hit] = await sql.unsafe(
-        `select 1 from bolide_changes c where c.table_name = $${n + 1} and c.id > $${n + 2} and (${matches('new')} or ${matches('old')}) limit 1`,
-        [...dep.where.params, dep.table, offset],
+        `select 1 from bolide_changes c where c.table_name = $${n + 1} and c.id > $${n + 2}${upTo === undefined ? '' : ` and c.id <= $${n + 3}`} and (${matches('new')} or ${matches('old')}) limit 1`,
+        [...dep.where.params, dep.table, offset, ...(upTo === undefined ? [] : [upTo])],
       )
       if (hit) return true
     }
@@ -158,20 +161,21 @@ export function postgresSync(sql: ListeningSqlClient, options: PostgresSyncOptio
 
       // Listen before reading, so a change committed between the read and the wait still wakes this request.
       const woken = live ? waiter([table, ...deps], signal) : undefined
-      // A table the rule reads changed in a way that matters: which rows the shape has may differ now.
-      if (await depsChanged(where, offset)) {
-        woken?.cancel()
-        return json(mustRefetch, {}, 409)
-      }
+      // A table the rule reads changed in a way that matters: which rows the shape has may differ now. It is
+      // checked after the shape's own changes are read, up to the offset this answer gives back, so a change
+      // committed in between can't be skipped.
+      const depsChangedFor = (changes: ChangeRow[]) => depsChanged(where, offset, changes.length ? Number(changes[changes.length - 1]!.id) : undefined)
       let changes = await changesAfter(table, where, offset)
-      if (!changes.length && woken) {
+      let refetch = await depsChangedFor(changes)
+      if (!refetch && !changes.length && woken) {
         await woken.promise
         if (!signal.aborted) {
-          if (await depsChanged(where, offset)) return json(mustRefetch, {}, 409)
           changes = await changesAfter(table, where, offset)
+          refetch = await depsChangedFor(changes)
         }
       }
       woken?.cancel()
+      if (refetch) return json(mustRefetch, {}, 409)
       const messages: unknown[] = []
       for (const c of changes) {
         if (c.new_in) messages.push(message(table, c.old_in ? 'update' : 'insert', project(c.new!, columns), c.txid))

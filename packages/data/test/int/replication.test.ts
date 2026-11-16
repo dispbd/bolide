@@ -167,6 +167,35 @@ describe('replicationSync on Postgres', () => {
     assert.equal(await g.poll(), 'must-refetch')
   })
 
+  test('a table that was missing on its first request is set up on the next', async () => {
+    const later = defineTable('later', { id: t.integer().primaryKey(), ownerId: t.text(), title: t.text() })
+    const f = follower(() => sync, defineShape('later.all', later))
+    await assert.rejects(f.poll(), /no table "later"/)
+    await sql.unsafe(schemaSql([later]))
+    assert.equal(await f.catchUp(), 'up-to-date')
+    await sql.unsafe(`insert into later values (1, 'ann', 'now here')`)
+    for (let i = 0; i < 50 && !f.titles().length; i++) {
+      await f.catchUp()
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    assert.deepEqual(f.titles(), ['now here'])
+  })
+
+  test('a lost replication connection is reported once, comes back, and loses nothing', async () => {
+    const logged: string[] = []
+    await sync.close!()
+    sync = open({ log: (m) => logged.push(m) })
+    await sync.start!(['items'])
+    const f = follower(() => sync, all)
+    await settle(f)
+    await admin.unsafe(`select pg_terminate_backend(active_pid) from pg_replication_slots where slot_name = '${slot}' and active_pid is not null`)
+    await sql.unsafe(`insert into items (id, owner_id, title) values (30, 'ann', 'during the outage')`)
+    for (let i = 0; i < 100 && !logged.some((m) => /again/.test(m)); i++) await new Promise((r) => setTimeout(r, 50))
+    assert.deepEqual(logged, ['replicationSync lost its replication connection; reconnecting', 'replicationSync is replicating again'])
+    await settle(f)
+    assert.ok(f.titles().includes('during the outage'))
+  })
+
   test('setup mistakes fail at start with what to do', async () => {
     const other = replicationSync(sql, { url, slot: `${slot}_x`, publication })
     await assert.rejects(other.start!(['nope']), /no table "nope"/)

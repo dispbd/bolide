@@ -162,6 +162,7 @@ dataModule({ sql, tables, mutators, shapes, sync: replicationSync(sql, { url: pr
 - It opens one replication connection (with the `postgres` package) on a slot named `bolide`. The slot survives restarts: the app tells Postgres to keep the WAL of the changes it still holds, and reads them again after a restart, so clients resume where they were. Each running instance of the app needs its own slot (`slot: 'bolide_' + instanceId`); a slot left behind by an instance that is gone keeps WAL until it is dropped (`select pg_drop_replication_slot('...')`).
 - Changes are kept in memory for 10 minutes (`keep`, and at most `maxChanges` per table). A client further behind, or one from before a lost slot or a `TRUNCATE`, loads its shape again.
 - Offsets are WAL positions, so they mean the same on every instance and after a restart.
+- If the replication connection drops, it reconnects with backoff and reads on from where it was. The first failure of each outage and the recovery go to `log` (default `console.warn`): `replicationSync(sql, { url, log: (msg, err) => logger.warn(msg, { err }) })`.
 - A first load reads the table in a snapshot and starts the stream before any transaction that the snapshot doesn't include, by its transaction id. Changes the snapshot already has may be sent again, which the client applies without effect.
 - Each live request runs the shape's `where` on the new changes in Postgres, so a change matches exactly as the first load would have matched it.
 

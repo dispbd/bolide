@@ -78,7 +78,8 @@ export interface ClientOptions {
   onRejected?: (mutation: Mutation, error: MutationRejected) => void
   /**
    * Keeps synced rows and unsent mutations across reloads (offline mode): `indexedDbStorage()` from
-   * `@bolide/client/idb` in the browser. Saved data is kept per user id.
+   * `@bolide/client/idb` in the browser. Saved data is kept per user id: when the user changes, create a new
+   * client (this one stops saving), and call `clearStorage()` on sign-out.
    */
   storage?: ClientStorage
   /** Called when the storage fails; the client keeps working from memory. Default: `console.warn`. */
@@ -184,8 +185,10 @@ export function createClient(options: ClientOptions) {
   /** Each mutation is its own entry, so tabs sharing the storage never overwrite each other's. */
   const mutationKey = (p: PendingMutation) => `${mutationPrefix}${p.savedAt}:${p.id}`
   let writes = Promise.resolve()
+  let cleared = false
   const write = (fn: (s: ClientStorage) => Promise<void>) => {
-    if (!storage) return
+    // Another user signed in (or this one signed out): their data must not land under this user's key.
+    if (!storage || cleared || encodeURIComponent(userId() ?? '') !== scope) return
     writes = writes.then(() => fn(storage)).catch(onStorageError)
   }
 
@@ -645,6 +648,20 @@ export function createClient(options: ClientOptions) {
     saved: async () => {
       for (const s of shapes.values()) flushShapeSave(s)
       await writes
+    },
+    /**
+     * Deletes everything saved in the storage, for every user, and stops this client from saving more. For
+     * sign-out on a shared device: then close the client and create one for the next user.
+     */
+    async clearStorage() {
+      cleared = true
+      for (const s of shapes.values()) {
+        clearTimeout(s.saveTimer)
+        s.saveTimer = undefined
+      }
+      await writes
+      if (!storage) return
+      for (const [key] of await storage.list('')) if (key.startsWith('shape:') || key.startsWith('mutation:')) await storage.delete(key)
     },
     /** Stops every shape stream and stops sending. Unconfirmed mutations reject with code `closed`. */
     close() {

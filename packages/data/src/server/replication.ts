@@ -475,7 +475,6 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
       const live = protocol.get('live') === 'true'
 
       if (offsetParam === '-1') {
-        const loadStart = Date.now()
         let pos: Pos = [head, LAST]
         const { rows, snapshot } = await sql.begin(async (t) => {
           await t.unsafe('set transaction isolation level repeatable read')
@@ -486,18 +485,22 @@ export function replicationSync(sql: SqlClient, options: ReplicationSyncOptions)
         // A transaction already in the log but not in the snapshot (it committed while the snapshot was taken)
         // must still reach this client: start before it. Later ones in the log are sent again, which is harmless.
         // (For a table the rule reads, a change sent again means one more load, which is rare and also harmless.)
-        // Newest first, up to a change that was visible and had committed well before this load began: older
-        // ones were too.
+        // Oldest first, one check per transaction, up to the first invisible one. The scan can't stop early at a
+        // visible one: a transaction becomes visible when it leaves the proc array, not in commit record order,
+        // so an older commit can still be in progress (synchronous_commit waiting on a standby, for instance).
         const start = pos
-        const settled = loadStart - 1000
-        for (const l of [log, ...deps.map((d) => d.log)])
-          for (let i = l.changes.length - 1; i >= 0; i--) {
-            const c = l.changes[i]!
-            if (after(c.pos, start)) continue
+        for (const l of [log, ...deps.map((d) => d.log)]) {
+          let lsn = -1n
+          for (const c of l.changes) {
+            if (after(c.pos, start)) break
+            if (c.pos[0] === lsn) continue
+            lsn = c.pos[0]
             if (invisible(snapshot, c.xid)) {
-              if (after(pos, [c.pos[0] - 1n, LAST])) pos = [c.pos[0] - 1n, LAST]
-            } else if (c.at < settled) break
+              if (after(pos, [lsn - 1n, LAST])) pos = [lsn - 1n, LAST]
+              break
+            }
           }
+        }
         const body = [...rows.map((r) => shapeMessage(table, 'insert', project(r.row as Record<string, unknown>, columns))), upToDate]
         return json(body, { 'electric-offset': offsetOfSafe(pos), 'electric-schema': '{}', 'electric-up-to-date': '' })
       }
